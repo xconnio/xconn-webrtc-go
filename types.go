@@ -35,7 +35,7 @@ type ProviderConfig struct {
 	TopicHandleRemoteCandidates string
 	TopicPublishLocalCandidate  string
 	Serializer                  serializers.Serializer
-	Routed                      bool
+	Router                      *xconn.Router
 	Authenticator               auth.ServerAuthenticator
 	IceServers                  []webrtc.ICEServer
 }

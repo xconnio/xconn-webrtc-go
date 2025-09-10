@@ -122,15 +122,11 @@ func (r *WebRTCProvider) handleWAMPClient(channel *webrtc.DataChannel, config *P
 		return err
 	}
 
-	if !config.Routed {
+	if config.Router == nil {
 		return nil
 	}
 
-	xconnRouter := xconn.NewRouter()
-	if err := xconnRouter.AddRealm("realm1"); err != nil {
-		return err
-	}
-	if err = xconnRouter.AttachClient(base); err != nil {
+	if err = config.Router.AttachClient(base); err != nil {
 		return fmt.Errorf("failed to attach client %w", err)
 	}
 
@@ -141,11 +137,11 @@ func (r *WebRTCProvider) handleWAMPClient(channel *webrtc.DataChannel, config *P
 	for {
 		msg, err := base.ReadMessage()
 		if err != nil {
-			_ = xconnRouter.DetachClient(base)
+			_ = config.Router.DetachClient(base)
 			break
 		}
 
-		if err = xconnRouter.ReceiveMessage(base, msg); err != nil {
+		if err = config.Router.ReceiveMessage(base, msg); err != nil {
 			log.Println(err)
 			return nil
 		}
