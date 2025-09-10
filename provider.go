@@ -63,18 +63,19 @@ func (r *WebRTCProvider) handleOffer(requestID string, offer Offer, answerConfig
 	return answerer.Answer(answerConfig, offer, 100*time.Millisecond)
 }
 
-func (r *WebRTCProvider) Setup(config *ProviderConfig) {
+func (r *WebRTCProvider) Setup(config *ProviderConfig) error {
+	if err := config.validate(); err != nil {
+		return fmt.Errorf("invalid provider config: %w", err)
+	}
 	r.iceServers = append(r.iceServers, config.IceServers...)
 	registerResp := config.Session.Register(config.ProcedureHandleOffer, r.offerFunc).Do()
 	if registerResp.Err != nil {
-		log.Errorf("failed to register webrtc offer: %v", registerResp.Err)
-		return
+		return fmt.Errorf("failed to register webrtc offer: %w", registerResp.Err)
 	}
 
 	subscribeResp := config.Session.Subscribe(config.TopicHandleRemoteCandidates, r.onRemoteCandidate).Do()
 	if subscribeResp.Err != nil {
-		log.Errorf("failed to subscribe to webrtc candidates events: %v", subscribeResp.Err)
-		return
+		return fmt.Errorf("failed to subscribe to webrtc candidates events: %w", subscribeResp.Err)
 	}
 
 	r.OnAnswerer(func(sessionID string, answerer *Answerer) {
@@ -104,6 +105,8 @@ func (r *WebRTCProvider) Setup(config *ProviderConfig) {
 			}
 		}()
 	})
+
+	return nil
 }
 
 func (r *WebRTCProvider) handleWAMPClient(channel *webrtc.DataChannel, config *ProviderConfig) error {

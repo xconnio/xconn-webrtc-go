@@ -95,7 +95,9 @@ func main() {
 		Serializer:                  &serializers.CBORSerializer{},
 		Authenticator:               NewAuthenticator(),
 	}
-	webRtcManager.Setup(cfg)
+	if err := webRtcManager.Setup(cfg); err != nil {
+		log.Fatal("Failed to setup webRtc provider:", err)
+	}
 
 	// Close server if SIGINT (CTRL-c) received.
 	closeChan := make(chan os.Signal, 1)

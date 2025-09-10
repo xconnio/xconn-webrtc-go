@@ -22,9 +22,37 @@ type ClientConfig struct {
 	Session                  *xconn.Session
 }
 
+func (c *ClientConfig) validate() error {
+	if c == nil {
+		return fmt.Errorf("client config is nil")
+	}
+	if c.Realm == "" {
+		return fmt.Errorf("realm must not be empty")
+	}
+	if c.ProcedureWebRTCOffer == "" {
+		return fmt.Errorf("ProcedureWebRTCOffer must not be empty")
+	}
+	if c.TopicAnswererOnCandidate == "" {
+		return fmt.Errorf("TopicAnswererOnCandidate must not be empty")
+	}
+	if c.TopicOffererOnCandidate == "" {
+		return fmt.Errorf("TopicOffererOnCandidate must not be empty")
+	}
+	if c.Serializer == nil {
+		c.Serializer = xconn.JSONSerializerSpec
+	}
+	if c.Authenticator == nil {
+		c.Authenticator = auth.NewAnonymousAuthenticator("", nil)
+	}
+	if c.Session == nil {
+		return fmt.Errorf("session must not be nil")
+	}
+	return nil
+}
+
 func connectWebRTC(config *ClientConfig) (*WebRTCSession, error) {
-	if config.Session == nil {
-		return nil, fmt.Errorf("invalid client config: Session must not be nil")
+	if err := config.validate(); err != nil {
+		return nil, fmt.Errorf("invalid client config: %w", err)
 	}
 	offerer := NewOfferer()
 	offerConfig := &OfferConfig{

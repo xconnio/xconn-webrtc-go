@@ -1,6 +1,8 @@
 package wamp_webrtc_go
 
 import (
+	"fmt"
+
 	"github.com/pion/webrtc/v4"
 
 	"github.com/xconnio/wampproto-go/auth"
@@ -36,6 +38,28 @@ type ProviderConfig struct {
 	Routed                      bool
 	Authenticator               auth.ServerAuthenticator
 	IceServers                  []webrtc.ICEServer
+}
+
+func (c *ProviderConfig) validate() error {
+	if c == nil {
+		return fmt.Errorf("provider config is nil")
+	}
+	if c.Session == nil {
+		return fmt.Errorf("session must not be nil")
+	}
+	if c.ProcedureHandleOffer == "" {
+		return fmt.Errorf("procedureHandleOffer must not be empty")
+	}
+	if c.TopicHandleRemoteCandidates == "" {
+		return fmt.Errorf("topicHandleRemoteCandidates must not be empty")
+	}
+	if c.TopicPublishLocalCandidate == "" {
+		return fmt.Errorf("topicPublishLocalCandidate must not be empty")
+	}
+	if c.Serializer == nil {
+		c.Serializer = &serializers.JSONSerializer{}
+	}
+	return nil
 }
 
 type WebRTCSession struct {
