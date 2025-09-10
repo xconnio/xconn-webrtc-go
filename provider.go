@@ -134,18 +134,6 @@ func (r *WebRTCProvider) handleWAMPClient(channel *webrtc.DataChannel, config *P
 		return fmt.Errorf("failed to attach client %w", err)
 	}
 
-	parser := NewWebRTCMessageAssembler()
-	channel.OnMessage(func(msg webrtc.DataChannelMessage) {
-		fullMsg := parser.Feed(msg.Data)
-
-		if fullMsg != nil {
-			if err = base.Write(fullMsg); err != nil {
-				log.Errorf("failed to send wamp message: %v", err)
-				return
-			}
-		}
-	})
-
 	channel.OnClose(func() {
 		_ = base.Close()
 	})
@@ -160,19 +148,6 @@ func (r *WebRTCProvider) handleWAMPClient(channel *webrtc.DataChannel, config *P
 		if err = xconnRouter.ReceiveMessage(base, msg); err != nil {
 			log.Println(err)
 			return nil
-		}
-
-		data, err := config.Serializer.Serialize(msg)
-		if err != nil {
-			log.Printf("failed to serialize message: %v", err)
-			return nil
-		}
-
-		for chunk := range parser.ChunkMessage(data) {
-			if err = channel.Send(chunk); err != nil {
-				log.Errorf("failed to write message: %v", err)
-				return nil
-			}
 		}
 	}
 
