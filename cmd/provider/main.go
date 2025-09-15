@@ -81,6 +81,19 @@ func (a *Authenticator) Authenticate(request auth.Request) (auth.Response, error
 }
 
 func main() {
+	r := xconn.NewRouter()
+	if err := r.AddRealm("realm1"); err != nil {
+		log.Fatal(err)
+	}
+	defer r.Close()
+
+	server := xconn.NewServer(r, nil, nil)
+	closer, err := server.ListenAndServeWebSocket(xconn.NetworkTCP, "0.0.0.0:8080")
+	if err != nil {
+		log.Fatal("Failed to start server:", err)
+	}
+	defer func() { _ = closer.Close() }()
+
 	session, err := xconn.ConnectAnonymous(context.Background(), "ws://localhost:8080/ws", "realm1")
 	if err != nil {
 		log.Fatal("Failed to connect to server:", err)
@@ -94,6 +107,7 @@ func main() {
 		TopicPublishLocalCandidate:  topicOffererOnCandidate,
 		Serializer:                  &serializers.CBORSerializer{},
 		Authenticator:               NewAuthenticator(),
+		Router:                      r,
 	}
 	if err := webRtcManager.Setup(cfg); err != nil {
 		log.Fatal("Failed to setup webRtc provider:", err)
