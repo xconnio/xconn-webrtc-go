@@ -1,4 +1,4 @@
-package wamp_webrtc_go
+package xconnwebrtc
 
 import (
 	"encoding/json"
@@ -104,7 +104,7 @@ func connectWebRTC(config *ClientConfig) (*WebRTCSession, error) {
 		return nil, callResponse.Err
 	}
 
-	answerText, err := callResponse.Args[0].String()
+	answerText, err := callResponse.ArgString(0)
 	if err != nil {
 		return nil, err
 	}

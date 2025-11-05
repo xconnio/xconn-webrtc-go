@@ -5,9 +5,9 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/xconnio/wamp-webrtc-go"
 	"github.com/xconnio/wampproto-go/auth"
 	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-webrtc-go"
 )
 
 const (
@@ -22,7 +22,7 @@ func main() {
 		log.Fatal("Failed to connect to server:", err)
 	}
 
-	config := &wamp_webrtc_go.ClientConfig{
+	config := &xconnwebrtc.ClientConfig{
 		Realm:                    "realm1",
 		ProcedureWebRTCOffer:     procedureWebRTCOffer,
 		TopicAnswererOnCandidate: topicAnswererOnCandidate,
@@ -31,7 +31,7 @@ func main() {
 		Authenticator:            auth.NewWAMPCRAAuthenticator("john", "hello", map[string]any{}),
 		Session:                  session,
 	}
-	webRTCSession, err := wamp_webrtc_go.ConnectWebRTC(config)
+	webRTCSession, err := xconnwebrtc.ConnectWebRTC(config)
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -8,10 +8,10 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/xconnio/wamp-webrtc-go"
 	"github.com/xconnio/wampproto-go/auth"
 	"github.com/xconnio/wampproto-go/serializers"
 	"github.com/xconnio/xconn-go"
+	"github.com/xconnio/xconn-webrtc-go"
 )
 
 const (
@@ -99,8 +99,8 @@ func main() {
 		log.Fatal("Failed to connect to server:", err)
 	}
 
-	webRtcManager := wamp_webrtc_go.NewWebRTCHandler()
-	cfg := &wamp_webrtc_go.ProviderConfig{
+	webRtcManager := xconnwebrtc.NewWebRTCHandler()
+	cfg := &xconnwebrtc.ProviderConfig{
 		Session:                     session,
 		ProcedureHandleOffer:        procedureWebRTCOffer,
 		TopicHandleRemoteCandidates: topicAnswererOnCandidate,

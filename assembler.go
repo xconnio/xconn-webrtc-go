@@ -1,19 +1,23 @@
-package wamp_webrtc_go
+package xconnwebrtc
 
 import (
 	"bytes"
 	"sync"
 )
 
+const MtuSize = 16 * 1024
+
 type WebRTCMessageAssembler struct {
 	buffer *bytes.Buffer
+	mtu    int
 
 	sync.Mutex
 }
 
-func NewWebRTCMessageAssembler() *WebRTCMessageAssembler {
+func NewWebRTCMessageAssembler(mtu int) *WebRTCMessageAssembler {
 	return &WebRTCMessageAssembler{
 		buffer: bytes.NewBuffer(nil),
+		mtu:    mtu,
 	}
 }
 
@@ -21,7 +25,7 @@ func (m *WebRTCMessageAssembler) ChunkMessage(message []byte) chan []byte {
 	m.Lock()
 	defer m.Unlock()
 
-	chunkSize := 16*1024 - 1
+	chunkSize := m.mtu - 1
 	totalChunks := (len(message) + chunkSize - 1) / chunkSize
 
 	chunks := make(chan []byte)
