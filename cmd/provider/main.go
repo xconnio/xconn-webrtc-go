@@ -87,6 +87,21 @@ func main() {
 	}
 	defer r.Close()
 
+	err := r.AddRealmRole("realm1", xconn.RealmRole{
+		Name: "anonymous",
+		Permissions: []xconn.Permission{{
+			URI:            "io.xconn.webrtc.",
+			MatchPolicy:    "prefix",
+			AllowSubscribe: true,
+			AllowPublish:   true,
+			AllowRegister:  true,
+			AllowCall:      true,
+		}},
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	server := xconn.NewServer(r, nil, nil)
 	closer, err := server.ListenAndServeWebSocket(xconn.NetworkTCP, "0.0.0.0:8080")
 	if err != nil {
