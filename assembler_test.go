@@ -1,11 +1,11 @@
-package wamp_webrtc_go_test
+package xconnwebrtc_test
 
 import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/xconnio/wamp-webrtc-go"
+	"github.com/xconnio/xconn-webrtc-go"
 )
 
 func TestWebRTCMessageAssembler(t *testing.T) {
@@ -15,7 +15,7 @@ func TestWebRTCMessageAssembler(t *testing.T) {
 			message[i] = byte(i % 256)
 		}
 
-		assembler := wamp_webrtc_go.NewWebRTCMessageAssembler()
+		assembler := xconnwebrtc.NewWebRTCMessageAssembler(xconnwebrtc.MtuSize)
 		chunks := assembler.ChunkMessage(message)
 
 		var reconstructedMessage []byte
@@ -37,7 +37,7 @@ func TestWebRTCMessageAssembler(t *testing.T) {
 
 	t.Run("Feed", func(t *testing.T) {
 		message := []byte("Hello, World!")
-		assembler := wamp_webrtc_go.NewWebRTCMessageAssembler()
+		assembler := xconnwebrtc.NewWebRTCMessageAssembler(xconnwebrtc.MtuSize)
 
 		chunks := assembler.ChunkMessage(message)
 		var finalMessage []byte

@@ -1,4 +1,4 @@
-package wamp_webrtc_go
+package xconnwebrtc
 
 import (
 	"fmt"

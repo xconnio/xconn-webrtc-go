@@ -1,4 +1,4 @@
-package wamp_webrtc_go
+package xconnwebrtc
 
 import (
 	"net"
@@ -15,10 +15,10 @@ type WebRTCPeer struct {
 	assembler   *WebRTCMessageAssembler
 }
 
-func NewWebRTCPeer(channel *webrtc.DataChannel) *WebRTCPeer {
+func NewWebRTCPeer(channel *webrtc.DataChannel) xconn.Peer {
 	messageChan := make(chan []byte, 1)
 
-	assembler := NewWebRTCMessageAssembler()
+	assembler := NewWebRTCMessageAssembler(MtuSize)
 	channel.OnMessage(func(msg webrtc.DataChannelMessage) {
 		toSend := assembler.Feed(msg.Data)
 
@@ -34,19 +34,19 @@ func NewWebRTCPeer(channel *webrtc.DataChannel) *WebRTCPeer {
 	}
 }
 
-func (w WebRTCPeer) Type() xconn.TransportType {
+func (w *WebRTCPeer) Type() xconn.TransportType {
 	return xconn.TransportNone
 }
 
-func (w WebRTCPeer) NetConn() net.Conn {
+func (w *WebRTCPeer) NetConn() net.Conn {
 	return nil
 }
 
-func (w WebRTCPeer) Read() ([]byte, error) {
+func (w *WebRTCPeer) Read() ([]byte, error) {
 	return <-w.messageChan, nil
 }
 
-func (w WebRTCPeer) Write(bytes []byte) error {
+func (w *WebRTCPeer) Write(bytes []byte) error {
 	for chunk := range w.assembler.ChunkMessage(bytes) {
 		if err := w.channel.Send(chunk); err != nil {
 			return err
@@ -54,4 +54,16 @@ func (w WebRTCPeer) Write(bytes []byte) error {
 	}
 
 	return nil
+}
+
+func (w *WebRTCPeer) TryWrite(bytes []byte) (bool, error) {
+	if err := w.Write(bytes); err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+func (w *WebRTCPeer) Close() error {
+	return w.channel.Close()
 }
