@@ -56,10 +56,16 @@ func (m *WebRTCMessageAssembler) Feed(data []byte) []byte {
 	m.Lock()
 	defer m.Unlock()
 
+	if len(data) == 0 {
+		return nil
+	}
+
 	m.buffer.Write(data[1:])
 	isFinal := data[0]
+
 	if isFinal == 1 {
-		out := m.buffer.Bytes()
+		out := make([]byte, m.buffer.Len())
+		copy(out, m.buffer.Bytes())
 		m.buffer.Reset()
 		return out
 	}
