@@ -20,6 +20,8 @@ type WebRTCProvider struct {
 
 	iceServers []webrtc.ICEServer
 
+	ready chan *webrtc.DataChannel
+
 	sync.Mutex
 }
 
@@ -27,6 +29,7 @@ func NewWebRTCHandler() *WebRTCProvider {
 	return &WebRTCProvider{
 		answerers:  make(map[string]*Answerer),
 		iceServers: make([]webrtc.ICEServer, 0),
+		ready:      make(chan *webrtc.DataChannel, 1),
 	}
 }
 
@@ -96,6 +99,7 @@ func (r *WebRTCProvider) Setup(config *ProviderConfig) error {
 		go func() {
 			select {
 			case channel := <-answerer.WaitReady():
+				r.ready <- channel
 				if err := r.handleWAMPClient(channel, config); err != nil {
 					log.Errorf("failed to handle answer: %v", err)
 					_ = answerer.connection.Close()
@@ -107,6 +111,15 @@ func (r *WebRTCProvider) Setup(config *ProviderConfig) error {
 	})
 
 	return nil
+}
+
+func (r *WebRTCProvider) WaitDataChannel() (*webrtc.DataChannel, error) {
+	select {
+	case dc := <-r.ready:
+		return dc, nil
+	case <-time.After(30 * time.Second):
+		return nil, fmt.Errorf("timeout waiting for webrtc data channel")
+	}
 }
 
 func (r *WebRTCProvider) handleWAMPClient(channel *webrtc.DataChannel, config *ProviderConfig) error {
