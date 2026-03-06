@@ -159,3 +159,21 @@ func ConnectWAMP(config *ClientConfig) (*xconn.Session, error) {
 
 	return wampSession, nil
 }
+
+func ConnectWAMPAndWebRTC(config *ClientConfig) (*xconn.Session, *webrtc.DataChannel, error) {
+	webRTCConnection, err := connectWebRTC(config)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	peer := NewWebRTCPeer(webRTCConnection.Channel)
+
+	base, err := xconn.Join(peer, config.Realm, config.Serializer.Serializer(), config.Authenticator)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	wampSession := xconn.NewSession(base, config.Serializer.Serializer())
+
+	return wampSession, webRTCConnection.Channel, nil
+}
