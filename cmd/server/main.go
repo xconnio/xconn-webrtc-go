@@ -10,8 +10,11 @@ import (
 )
 
 func main() {
-	r := xconn.NewRouter()
-	if err := r.AddRealm("realm1"); err != nil {
+	r, err := xconn.NewRouter(xconn.DefaultRouterConfig())
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := r.AddRealm("realm1", xconn.DefaultRealmConfig()); err != nil {
 		log.Fatal(err)
 	}
 	defer r.Close()

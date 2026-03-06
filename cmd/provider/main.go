@@ -81,26 +81,28 @@ func (a *Authenticator) Authenticate(request auth.Request) (auth.Response, error
 }
 
 func main() {
-	r := xconn.NewRouter()
-	if err := r.AddRealm("realm1"); err != nil {
-		log.Fatal(err)
-	}
-	defer r.Close()
-
-	err := r.AddRealmRole("realm1", xconn.RealmRole{
-		Name: "anonymous",
-		Permissions: []xconn.Permission{{
-			URI:            "io.xconn.webrtc.",
-			MatchPolicy:    "prefix",
-			AllowSubscribe: true,
-			AllowPublish:   true,
-			AllowRegister:  true,
-			AllowCall:      true,
-		}},
-	})
+	r, err := xconn.NewRouter(xconn.DefaultRouterConfig())
 	if err != nil {
 		log.Fatal(err)
 	}
+	if err := r.AddRealm("realm1", &xconn.RealmConfig{
+		Roles: []xconn.RealmRole{
+			{
+				Name: "anonymous",
+				Permissions: []xconn.Permission{{
+					URI:            "io.xconn.webrtc.",
+					MatchPolicy:    "prefix",
+					AllowSubscribe: true,
+					AllowPublish:   true,
+					AllowRegister:  true,
+					AllowCall:      true,
+				}},
+			},
+		},
+	}); err != nil {
+		log.Fatal(err)
+	}
+	defer r.Close()
 
 	server := xconn.NewServer(r, nil, nil)
 	closer, err := server.ListenAndServeWebSocket(xconn.NetworkTCP, "0.0.0.0:8080")
