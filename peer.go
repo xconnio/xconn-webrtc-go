@@ -4,7 +4,6 @@ import (
 	"io"
 	"net"
 	"sync"
-	"time"
 
 	"github.com/pion/webrtc/v4"
 
@@ -12,36 +11,28 @@ import (
 )
 
 type WebRTCPeer struct {
-	channel    *webrtc.DataChannel
-	connection *webrtc.PeerConnection
+	channel *webrtc.DataChannel
 
 	messageChan chan []byte
 	assembler   *WebRTCMessageAssembler
 
 	done      chan struct{}
-	readErr   error
 	closeOnce sync.Once
-
-	sync.Mutex
-	disconnectTimer    *time.Timer
-	disconnectDeadline time.Duration
 }
 
-func NewWebRTCPeer(channel *webrtc.DataChannel, connection *webrtc.PeerConnection) xconn.Peer {
+func NewWebRTCPeer(channel *webrtc.DataChannel) xconn.Peer {
 	messageChan := make(chan []byte, 1)
 
-	peer := &WebRTCPeer{
-		channel:            channel,
-		connection:         connection,
-		messageChan:        messageChan,
-		assembler:          NewWebRTCMessageAssembler(MtuSize),
-		done:               make(chan struct{}),
-		readErr:            io.EOF,
-		disconnectDeadline: 1 * time.Second,
-	}
+	assembler := NewWebRTCMessageAssembler(MtuSize)
 
+	peer := &WebRTCPeer{
+		channel:     channel,
+		messageChan: messageChan,
+		assembler:   assembler,
+		done:        make(chan struct{}),
+	}
 	channel.OnMessage(func(msg webrtc.DataChannelMessage) {
-		toSend := peer.assembler.Feed(msg.Data)
+		toSend := assembler.Feed(msg.Data)
 		if toSend == nil {
 			return
 		}
@@ -51,20 +42,6 @@ func NewWebRTCPeer(channel *webrtc.DataChannel, connection *webrtc.PeerConnectio
 		case <-peer.done:
 		}
 	})
-
-	channel.OnError(func(err error) {
-		peer.closeWithError(err)
-	})
-
-	channel.OnClose(func() {
-		peer.closeWithError(io.EOF)
-	})
-
-	if connection != nil {
-		connection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-			peer.handleConnectionStateChange(state)
-		})
-	}
 
 	return peer
 }
@@ -82,10 +59,7 @@ func (w *WebRTCPeer) Read() ([]byte, error) {
 	case msg := <-w.messageChan:
 		return msg, nil
 	case <-w.done:
-		w.Lock()
-		err := w.readErr
-		w.Unlock()
-		return nil, err
+		return nil, io.EOF
 	}
 }
 
@@ -108,64 +82,8 @@ func (w *WebRTCPeer) TryWrite(bytes []byte) (bool, error) {
 }
 
 func (w *WebRTCPeer) Close() error {
-	w.closeWithError(io.EOF)
-	return w.channel.Close()
-}
-
-func (w *WebRTCPeer) closeWithError(err error) {
-	if err == nil {
-		err = io.EOF
-	}
-
 	w.closeOnce.Do(func() {
-		w.Lock()
-		if w.disconnectTimer != nil {
-			w.disconnectTimer.Stop()
-			w.disconnectTimer = nil
-		}
-		w.readErr = err
-		w.Unlock()
-
 		close(w.done)
 	})
-}
-
-func (w *WebRTCPeer) handleConnectionStateChange(state webrtc.PeerConnectionState) {
-	switch state {
-	case webrtc.PeerConnectionStateConnected:
-		w.stopDisconnectTimer()
-	case webrtc.PeerConnectionStateDisconnected:
-		w.startDisconnectTimer()
-	case webrtc.PeerConnectionStateFailed, webrtc.PeerConnectionStateClosed:
-		w.closeWithError(io.EOF)
-	default:
-	}
-}
-
-func (w *WebRTCPeer) startDisconnectTimer() {
-	w.Lock()
-	defer w.Unlock()
-
-	if w.disconnectTimer != nil {
-		return
-	}
-
-	w.disconnectTimer = time.AfterFunc(w.disconnectDeadline, func() {
-		if w.connection != nil && w.connection.ConnectionState() == webrtc.PeerConnectionStateConnected {
-			return
-		}
-		w.closeWithError(io.EOF)
-	})
-}
-
-func (w *WebRTCPeer) stopDisconnectTimer() {
-	w.Lock()
-	defer w.Unlock()
-
-	if w.disconnectTimer == nil {
-		return
-	}
-
-	w.disconnectTimer.Stop()
-	w.disconnectTimer = nil
+	return w.channel.Close()
 }
