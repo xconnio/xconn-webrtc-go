@@ -131,7 +131,7 @@ func ConnectWebRTC(config *ClientConfig) (*WebRTCSession, error) {
 		return nil, err
 	}
 
-	peer := NewWebRTCPeer(webRTCSession.Channel)
+	peer := NewWebRTCPeer(webRTCSession.Channel, webRTCSession.Connection)
 	_, err = xconn.Join(peer, config.Realm, config.Serializer.Serializer(), config.Authenticator)
 	if err != nil {
 		return nil, err
@@ -149,7 +149,7 @@ func ConnectWAMP(config *ClientConfig) (*xconn.Session, error) {
 		return nil, err
 	}
 
-	peer := NewWebRTCPeer(webRTCConnection.Channel)
+	peer := NewWebRTCPeer(webRTCConnection.Channel, webRTCConnection.Connection)
 	base, err := xconn.Join(peer, config.Realm, config.Serializer.Serializer(), config.Authenticator)
 	if err != nil {
 		return nil, err
@@ -166,7 +166,7 @@ func ConnectWAMPAndWebRTC(config *ClientConfig) (*xconn.Session, *webrtc.DataCha
 		return nil, nil, err
 	}
 
-	peer := NewWebRTCPeer(webRTCConnection.Channel)
+	peer := NewWebRTCPeer(webRTCConnection.Channel, webRTCConnection.Connection)
 
 	base, err := xconn.Join(peer, config.Realm, config.Serializer.Serializer(), config.Authenticator)
 	if err != nil {

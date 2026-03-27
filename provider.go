@@ -100,7 +100,7 @@ func (r *WebRTCProvider) Setup(config *ProviderConfig) error {
 			select {
 			case channel := <-answerer.WaitReady():
 				r.ready <- channel
-				if err := r.handleWAMPClient(channel, config); err != nil {
+				if err := r.handleWAMPClient(channel, answerer.connection, config); err != nil {
 					log.Errorf("failed to handle answer: %v", err)
 					_ = answerer.connection.Close()
 				}
@@ -122,8 +122,9 @@ func (r *WebRTCProvider) WaitDataChannel() (*webrtc.DataChannel, error) {
 	}
 }
 
-func (r *WebRTCProvider) handleWAMPClient(channel *webrtc.DataChannel, config *ProviderConfig) error {
-	rtcPeer := NewWebRTCPeer(channel)
+func (r *WebRTCProvider) handleWAMPClient(channel *webrtc.DataChannel, connection *webrtc.PeerConnection,
+	config *ProviderConfig) error {
+	rtcPeer := NewWebRTCPeer(channel, connection)
 
 	hello, err := xconn.ReadHello(rtcPeer, config.Serializer)
 	if err != nil {
