@@ -20,8 +20,6 @@ type WebRTCProvider struct {
 
 	iceServers []webrtc.ICEServer
 
-	ready chan *webrtc.DataChannel
-
 	sync.Mutex
 }
 
@@ -29,7 +27,6 @@ func NewWebRTCHandler() *WebRTCProvider {
 	return &WebRTCProvider{
 		answerers:  make(map[string]*Answerer),
 		iceServers: make([]webrtc.ICEServer, 0),
-		ready:      make(chan *webrtc.DataChannel, 1),
 	}
 }
 
@@ -56,6 +53,23 @@ func (r *WebRTCProvider) ensureAnswerer(sessionID string) *Answerer {
 	return answerer
 }
 
+func (r *WebRTCProvider) removeAnswerer(sessionID string, answerer *Answerer) {
+	r.Lock()
+	current, exists := r.answerers[sessionID]
+	if !exists || current != answerer {
+		r.Unlock()
+		return
+	}
+	delete(r.answerers, sessionID)
+	r.Unlock()
+
+	if answerer.connection != nil {
+		if err := answerer.connection.Close(); err != nil {
+			log.Debugf("failed to close peer connection for %s: %v", sessionID, err)
+		}
+	}
+}
+
 func (r *WebRTCProvider) addIceCandidate(requestID string, candidate webrtc.ICECandidateInit) error {
 	answerer := r.ensureAnswerer(requestID)
 	return answerer.AddICECandidate(candidate)
@@ -63,7 +77,24 @@ func (r *WebRTCProvider) addIceCandidate(requestID string, candidate webrtc.ICEC
 
 func (r *WebRTCProvider) handleOffer(requestID string, offer Offer, answerConfig *AnswerConfig) (*Answer, error) {
 	answerer := r.ensureAnswerer(requestID)
-	return answerer.Answer(answerConfig, offer, 100*time.Millisecond)
+	answer, err := answerer.Answer(answerConfig, offer, 100*time.Millisecond)
+	if err != nil {
+		r.removeAnswerer(requestID, answerer)
+		return nil, err
+	}
+
+	if answerer.connection != nil {
+		answerer.connection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+			switch state {
+			case webrtc.PeerConnectionStateDisconnected, webrtc.PeerConnectionStateFailed,
+				webrtc.PeerConnectionStateClosed:
+				r.removeAnswerer(requestID, answerer)
+			default:
+			}
+		})
+	}
+
+	return answer, nil
 }
 
 func (r *WebRTCProvider) Setup(config *ProviderConfig) error {
@@ -99,13 +130,13 @@ func (r *WebRTCProvider) Setup(config *ProviderConfig) error {
 		go func() {
 			select {
 			case channel := <-answerer.WaitReady():
-				r.ready <- channel
-				if err := r.handleWAMPClient(channel, config); err != nil {
+				if err := r.handleWAMPClient(sessionID, answerer, channel, config); err != nil {
 					log.Errorf("failed to handle answer: %v", err)
-					_ = answerer.connection.Close()
+					r.removeAnswerer(sessionID, answerer)
 				}
 			case <-time.After(20 * time.Second):
 				log.Errorln("webrtc connection didn't establish after 20 seconds")
+				r.removeAnswerer(sessionID, answerer)
 			}
 		}()
 	})
@@ -113,16 +144,10 @@ func (r *WebRTCProvider) Setup(config *ProviderConfig) error {
 	return nil
 }
 
-func (r *WebRTCProvider) WaitDataChannel() (*webrtc.DataChannel, error) {
-	select {
-	case dc := <-r.ready:
-		return dc, nil
-	case <-time.After(30 * time.Second):
-		return nil, fmt.Errorf("timeout waiting for webrtc data channel")
-	}
-}
+func (r *WebRTCProvider) handleWAMPClient(sessionID string, answerer *Answerer,
+	channel *webrtc.DataChannel, config *ProviderConfig) error {
+	defer r.removeAnswerer(sessionID, answerer)
 
-func (r *WebRTCProvider) handleWAMPClient(channel *webrtc.DataChannel, config *ProviderConfig) error {
 	rtcPeer := NewWebRTCPeer(channel)
 
 	hello, err := xconn.ReadHello(rtcPeer, config.Serializer)
@@ -145,6 +170,7 @@ func (r *WebRTCProvider) handleWAMPClient(channel *webrtc.DataChannel, config *P
 
 	channel.OnClose(func() {
 		_ = base.Close()
+		r.removeAnswerer(sessionID, answerer)
 	})
 
 	for {

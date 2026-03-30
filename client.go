@@ -55,6 +55,7 @@ func connectWebRTC(config *ClientConfig) (*WebRTCSession, error) {
 		return nil, fmt.Errorf("invalid client config: %w", err)
 	}
 	offerer := NewOfferer()
+	requestID := uuid.New().String()
 	offerConfig := &OfferConfig{
 		Protocol:                 config.Serializer.SubProtocol(),
 		ICEServers:               []webrtc.ICEServer{},
@@ -65,6 +66,16 @@ func connectWebRTC(config *ClientConfig) (*WebRTCSession, error) {
 	subscribeResponse := config.Session.Subscribe(config.TopicOffererOnCandidate, func(event *xconn.Event) {
 		if len(event.Args()) < 2 {
 			log.Errorf("invalid arguments length")
+			return
+		}
+
+		candidateRequestID, err := event.ArgString(0)
+		if err != nil {
+			log.Errorln("request ID must be a string")
+			return
+		}
+		if candidateRequestID != requestID {
+			log.Errorf("invalid requestID")
 			return
 		}
 
@@ -87,8 +98,12 @@ func connectWebRTC(config *ClientConfig) (*WebRTCSession, error) {
 	if subscribeResponse.Err != nil {
 		return nil, subscribeResponse.Err
 	}
+	defer func() {
+		if err := subscribeResponse.Unsubscribe(); err != nil {
+			log.Errorf("failed to unsubscribe from offerer candidates: %v", err)
+		}
+	}()
 
-	requestID := uuid.New().String()
 	offer, err := offerer.Offer(offerConfig, config.Session, requestID)
 	if err != nil {
 		return nil, err
