@@ -17,6 +17,11 @@ type Answer struct {
 
 type Offer = Answer
 
+type OfferResponse struct {
+	RequestID string `json:"requestID"`
+	Answer    Answer `json:"answer"`
+}
+
 type OfferConfig struct {
 	Protocol                 string
 	ICEServers               []webrtc.ICEServer

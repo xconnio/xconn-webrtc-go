@@ -20,7 +20,7 @@ func NewOfferer() *Offerer {
 	}
 }
 
-func (o *Offerer) Offer(offerConfig *OfferConfig, session *xconn.Session, requestID string) (*Offer, error) {
+func (o *Offerer) Offer(offerConfig *OfferConfig) (*Offer, error) {
 	// Prepare the configuration
 	config := webrtc.Configuration{
 		ICEServers: offerConfig.ICEServers,
@@ -31,18 +31,6 @@ func (o *Offerer) Offer(offerConfig *OfferConfig, session *xconn.Session, reques
 	if err != nil {
 		return nil, err
 	}
-
-	peerConnection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
-		if candidate != nil {
-			answerData, err := json.Marshal(candidate.ToJSON())
-			if err != nil {
-				log.Errorf("failed to marshal answer: %v", err)
-				return
-			}
-
-			_ = session.Publish(offerConfig.TopicAnswererOnCandidate).Args(requestID, string(answerData)).Do()
-		}
-	})
 
 	o.connection = peerConnection
 
@@ -81,6 +69,22 @@ func (o *Offerer) Offer(offerConfig *OfferConfig, session *xconn.Session, reques
 	return &Offer{
 		Description: offer,
 	}, nil
+}
+
+func (o *Offerer) StartICETrickle(session *xconn.Session, topic string, requestID string) {
+	o.connection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+		if candidate == nil {
+			return
+		}
+
+		answerData, err := json.Marshal(candidate.ToJSON())
+		if err != nil {
+			log.Errorf("failed to marshal answer: %v", err)
+			return
+		}
+
+		_ = session.Publish(topic).Args(requestID, string(answerData)).Do()
+	})
 }
 
 func (o *Offerer) HandleAnswer(answer Answer) error {
