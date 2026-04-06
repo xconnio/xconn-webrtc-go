@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/google/uuid"
 	"github.com/pion/webrtc/v4"
 	log "github.com/sirupsen/logrus"
 
@@ -55,7 +54,7 @@ func connectWebRTC(config *ClientConfig) (*WebRTCSession, error) {
 		return nil, fmt.Errorf("invalid client config: %w", err)
 	}
 	offerer := NewOfferer()
-	requestID := uuid.New().String()
+	var requestID string
 	offerConfig := &OfferConfig{
 		Protocol:                 config.Serializer.SubProtocol(),
 		ICEServers:               []webrtc.ICEServer{},
@@ -104,7 +103,7 @@ func connectWebRTC(config *ClientConfig) (*WebRTCSession, error) {
 		}
 	}()
 
-	offer, err := offerer.Offer(offerConfig, config.Session, requestID)
+	offer, err := offerer.Offer(offerConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -114,21 +113,27 @@ func connectWebRTC(config *ClientConfig) (*WebRTCSession, error) {
 		return nil, err
 	}
 
-	callResponse := config.Session.Call(config.ProcedureWebRTCOffer).Args(requestID, string(offerJSON)).Do()
+	callResponse := config.Session.Call(config.ProcedureWebRTCOffer).Args(string(offerJSON)).Do()
 	if callResponse.Err != nil {
 		return nil, callResponse.Err
 	}
 
-	answerText, err := callResponse.ArgString(0)
+	offerResponseText, err := callResponse.ArgString(0)
 	if err != nil {
 		return nil, err
 	}
-	var answer Answer
-	if err = json.Unmarshal([]byte(answerText), &answer); err != nil {
+	var offerResponse OfferResponse
+	if err = json.Unmarshal([]byte(offerResponseText), &offerResponse); err != nil {
 		return nil, err
 	}
+	requestID = offerResponse.RequestID
+	if requestID == "" {
+		return nil, fmt.Errorf("offer response request ID must not be empty")
+	}
 
-	if err = offerer.HandleAnswer(answer); err != nil {
+	offerer.StartICETrickle(config.Session, offerConfig.TopicAnswererOnCandidate, requestID)
+
+	if err = offerer.HandleAnswer(offerResponse.Answer); err != nil {
 		return nil, err
 	}
 

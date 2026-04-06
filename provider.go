@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/pion/webrtc/v4"
 	log "github.com/sirupsen/logrus"
 
@@ -190,16 +191,11 @@ func (r *WebRTCProvider) handleWAMPClient(sessionID string, answerer *Answerer,
 }
 
 func (r *WebRTCProvider) offerFunc(_ context.Context, invocation *xconn.Invocation) *xconn.InvocationResult {
-	if len(invocation.Args()) < 2 {
+	if len(invocation.Args()) < 1 {
 		return xconn.NewInvocationError(wampproto.ErrInvalidArgument)
 	}
 
-	requestID, err := invocation.ArgString(0)
-	if err != nil {
-		return xconn.NewInvocationError(wampproto.ErrInvalidArgument, "request ID must be a string")
-	}
-
-	offerJSON, err := invocation.ArgString(1)
+	offerJSON, err := invocation.ArgString(0)
 	if err != nil {
 		return xconn.NewInvocationError(wampproto.ErrInvalidArgument, "offer JSON must be a string")
 	}
@@ -212,18 +208,22 @@ func (r *WebRTCProvider) offerFunc(_ context.Context, invocation *xconn.Invocati
 	r.iceServers = append(r.iceServers, webrtc.ICEServer{URLs: []string{"stun:stun.l.google.com:19302"}})
 
 	cfg := &AnswerConfig{ICEServers: r.iceServers}
+	requestID := uuid.New().String()
 
 	answer, err := r.handleOffer(requestID, offer, cfg)
 	if err != nil {
 		return xconn.NewInvocationError(wampproto.ErrInvalidArgument, err.Error())
 	}
 
-	answerData, err := json.Marshal(answer)
+	responseData, err := json.Marshal(OfferResponse{
+		RequestID: requestID,
+		Answer:    *answer,
+	})
 	if err != nil {
 		return xconn.NewInvocationError(wampproto.ErrInvalidArgument, err.Error())
 	}
 
-	return xconn.NewInvocationResult(string(answerData))
+	return xconn.NewInvocationResult(string(responseData))
 }
 
 func (r *WebRTCProvider) onRemoteCandidate(event *xconn.Event) {
