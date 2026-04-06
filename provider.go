@@ -101,7 +101,7 @@ func (r *WebRTCProvider) Setup(config *ProviderConfig) error {
 	if err := config.validate(); err != nil {
 		return fmt.Errorf("invalid provider config: %w", err)
 	}
-	r.iceServers = cloneICEServers(config.IceServers)
+	r.iceServers = cloneICEServers(config.ICEServers)
 	registerResp := config.Session.Register(config.ProcedureHandleOffer, r.offerFunc).Do()
 	if registerResp.Err != nil {
 		return fmt.Errorf("failed to register webrtc offer: %w", registerResp.Err)
