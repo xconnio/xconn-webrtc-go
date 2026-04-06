@@ -2,6 +2,7 @@ package xconnwebrtc
 
 import (
 	"encoding/json"
+	"sync"
 
 	"github.com/pion/webrtc/v4"
 	log "github.com/sirupsen/logrus"
@@ -12,6 +13,13 @@ import (
 type Offerer struct {
 	connection *webrtc.PeerConnection
 	channel    chan *webrtc.DataChannel
+
+	publishICECandidate func(topic string, requestID string, candidate string) error
+	trickleTopic        string
+	trickleRequestID    string
+	pendingCandidates   []webrtc.ICECandidateInit
+
+	sync.Mutex
 }
 
 func NewOfferer() *Offerer {
@@ -33,6 +41,7 @@ func (o *Offerer) Offer(offerConfig *OfferConfig) (*Offer, error) {
 	}
 
 	o.connection = peerConnection
+	peerConnection.OnICECandidate(o.onICECandidate)
 
 	options := &webrtc.DataChannelInit{
 		Ordered:  &offerConfig.Ordered,
@@ -72,19 +81,19 @@ func (o *Offerer) Offer(offerConfig *OfferConfig) (*Offer, error) {
 }
 
 func (o *Offerer) StartICETrickle(session *xconn.Session, topic string, requestID string) {
-	o.connection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
-		if candidate == nil {
-			return
-		}
+	o.Lock()
+	o.publishICECandidate = func(topic string, requestID string, candidate string) error {
+		return session.Publish(topic).Args(requestID, candidate).Do().Err
+	}
+	o.trickleTopic = topic
+	o.trickleRequestID = requestID
+	pendingCandidates := append([]webrtc.ICECandidateInit(nil), o.pendingCandidates...)
+	o.pendingCandidates = nil
+	o.Unlock()
 
-		answerData, err := json.Marshal(candidate.ToJSON())
-		if err != nil {
-			log.Errorf("failed to marshal answer: %v", err)
-			return
-		}
-
-		_ = session.Publish(topic).Args(requestID, string(answerData)).Do()
-	})
+	for _, candidate := range pendingCandidates {
+		o.publishCandidate(topic, requestID, candidate)
+	}
 }
 
 func (o *Offerer) HandleAnswer(answer Answer) error {
@@ -107,4 +116,47 @@ func (o *Offerer) AddICECandidate(candidate webrtc.ICECandidateInit) error {
 
 func (o *Offerer) WaitReady() chan *webrtc.DataChannel {
 	return o.channel
+}
+
+func (o *Offerer) onICECandidate(candidate *webrtc.ICECandidate) {
+	if candidate == nil {
+		return
+	}
+
+	o.handleICECandidate(candidate.ToJSON())
+}
+
+func (o *Offerer) publishCandidate(topic string, requestID string, candidate webrtc.ICECandidateInit) {
+	candidateData, err := json.Marshal(candidate)
+	if err != nil {
+		log.Errorf("failed to marshal candidate: %v", err)
+		return
+	}
+
+	o.Lock()
+	publish := o.publishICECandidate
+	o.Unlock()
+	if publish == nil {
+		return
+	}
+
+	if err := publish(topic, requestID, string(candidateData)); err != nil {
+		log.Errorf("failed to publish ice candidate: %v", err)
+	}
+}
+
+func (o *Offerer) handleICECandidate(candidate webrtc.ICECandidateInit) {
+	o.Lock()
+	canPublish := o.publishICECandidate != nil && o.trickleTopic != "" && o.trickleRequestID != ""
+	if !canPublish {
+		o.pendingCandidates = append(o.pendingCandidates, candidate)
+		o.Unlock()
+		return
+	}
+
+	topic := o.trickleTopic
+	requestID := o.trickleRequestID
+	o.Unlock()
+
+	o.publishCandidate(topic, requestID, candidate)
 }
