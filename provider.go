@@ -26,8 +26,7 @@ type WebRTCProvider struct {
 
 func NewWebRTCHandler() *WebRTCProvider {
 	return &WebRTCProvider{
-		answerers:  make(map[string]*Answerer),
-		iceServers: make([]webrtc.ICEServer, 0),
+		answerers: make(map[string]*Answerer),
 	}
 }
 
@@ -102,7 +101,7 @@ func (r *WebRTCProvider) Setup(config *ProviderConfig) error {
 	if err := config.validate(); err != nil {
 		return fmt.Errorf("invalid provider config: %w", err)
 	}
-	r.iceServers = append(r.iceServers, config.IceServers...)
+	r.iceServers = cloneICEServers(config.IceServers)
 	registerResp := config.Session.Register(config.ProcedureHandleOffer, r.offerFunc).Do()
 	if registerResp.Err != nil {
 		return fmt.Errorf("failed to register webrtc offer: %w", registerResp.Err)
@@ -192,7 +191,7 @@ func (r *WebRTCProvider) handleWAMPClient(sessionID string, answerer *Answerer,
 
 func (r *WebRTCProvider) offerFunc(_ context.Context, invocation *xconn.Invocation) *xconn.InvocationResult {
 	if len(invocation.Args()) < 1 {
-		return xconn.NewInvocationError(wampproto.ErrInvalidArgument)
+		return xconn.NewInvocationError(wampproto.ErrInvalidArgument, "must be called with offer as argument")
 	}
 
 	offerJSON, err := invocation.ArgString(0)
@@ -202,17 +201,15 @@ func (r *WebRTCProvider) offerFunc(_ context.Context, invocation *xconn.Invocati
 
 	var offer Offer
 	if err := json.Unmarshal([]byte(offerJSON), &offer); err != nil {
-		return xconn.NewInvocationError(wampproto.ErrInvalidArgument, err.Error())
+		return xconn.NewInvocationError(wampproto.ErrInvalidArgument, fmt.Sprintf("invalid offer: %v", err))
 	}
 
-	r.iceServers = append(r.iceServers, webrtc.ICEServer{URLs: []string{"stun:stun.l.google.com:19302"}})
-
-	cfg := &AnswerConfig{ICEServers: r.iceServers}
+	cfg := &AnswerConfig{ICEServers: cloneICEServers(r.iceServers)}
 	requestID := uuid.New().String()
 
 	answer, err := r.handleOffer(requestID, offer, cfg)
 	if err != nil {
-		return xconn.NewInvocationError(wampproto.ErrInvalidArgument, err.Error())
+		return xconn.NewInvocationError(wampproto.ErrInvalidArgument, err)
 	}
 
 	responseData, err := json.Marshal(OfferResponse{
@@ -220,7 +217,7 @@ func (r *WebRTCProvider) offerFunc(_ context.Context, invocation *xconn.Invocati
 		Answer:    *answer,
 	})
 	if err != nil {
-		return xconn.NewInvocationError(wampproto.ErrInvalidArgument, err.Error())
+		return xconn.NewInvocationError(wampproto.ErrInvalidArgument, err)
 	}
 
 	return xconn.NewInvocationResult(string(responseData))
