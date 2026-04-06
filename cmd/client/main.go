@@ -30,6 +30,9 @@ func main() {
 		Serializer:               xconn.CBORSerializerSpec,
 		Authenticator:            auth.NewWAMPCRAAuthenticator("john", "hello", map[string]any{}),
 		Session:                  session,
+		ICEServers: []xconnwebrtc.ICEServer{
+			{URLs: []string{"stun:stun.l.google.com:19302"}},
+		},
 	}
 	webRTCSession, err := xconnwebrtc.ConnectWebRTC(config)
 	if err != nil {

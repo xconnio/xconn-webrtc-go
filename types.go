@@ -10,6 +10,16 @@ import (
 	"github.com/xconnio/xconn-go"
 )
 
+type (
+	ICEServer      = webrtc.ICEServer
+	CredentialType = webrtc.ICECredentialType
+)
+
+const (
+	ICECredentialTypePassword = webrtc.ICECredentialTypePassword
+	ICECredentialTypeOauth    = webrtc.ICECredentialTypeOauth
+)
+
 type Answer struct {
 	Candidates  []webrtc.ICECandidateInit `json:"candidates"`
 	Description webrtc.SessionDescription `json:"description"`
@@ -43,6 +53,17 @@ type ProviderConfig struct {
 	Router                      *xconn.Router
 	Authenticator               auth.ServerAuthenticator
 	IceServers                  []webrtc.ICEServer
+}
+
+func cloneICEServers(servers []webrtc.ICEServer) []webrtc.ICEServer {
+	if len(servers) == 0 {
+		return nil
+	}
+
+	cloned := make([]webrtc.ICEServer, len(servers))
+	copy(cloned, servers)
+
+	return cloned
 }
 
 func (c *ProviderConfig) validate() error {

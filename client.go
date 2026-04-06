@@ -19,6 +19,7 @@ type ClientConfig struct {
 	Serializer               xconn.SerializerSpec
 	Authenticator            auth.ClientAuthenticator
 	Session                  *xconn.Session
+	ICEServers               []webrtc.ICEServer
 }
 
 func (c *ClientConfig) validate() error {
@@ -57,7 +58,7 @@ func connectWebRTC(config *ClientConfig) (*WebRTCSession, error) {
 	var requestID string
 	offerConfig := &OfferConfig{
 		Protocol:                 config.Serializer.SubProtocol(),
-		ICEServers:               []webrtc.ICEServer{},
+		ICEServers:               cloneICEServers(config.ICEServers),
 		Ordered:                  true,
 		TopicAnswererOnCandidate: config.TopicAnswererOnCandidate,
 	}

@@ -125,6 +125,9 @@ func main() {
 		Serializer:                  &serializers.CBORSerializer{},
 		Authenticator:               NewAuthenticator(),
 		Router:                      r,
+		IceServers: []xconnwebrtc.ICEServer{
+			{URLs: []string{"stun:stun.l.google.com:19302"}},
+		},
 	}
 	if err := webRtcManager.Setup(cfg); err != nil {
 		log.Fatal("Failed to setup webRtc provider:", err)
