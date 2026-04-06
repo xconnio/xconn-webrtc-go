@@ -52,7 +52,7 @@ type ProviderConfig struct {
 	Serializer                  serializers.Serializer
 	Router                      *xconn.Router
 	Authenticator               auth.ServerAuthenticator
-	IceServers                  []webrtc.ICEServer
+	ICEServers                  []webrtc.ICEServer
 }
 
 func cloneICEServers(servers []webrtc.ICEServer) []webrtc.ICEServer {

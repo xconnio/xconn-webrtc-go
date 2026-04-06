@@ -125,7 +125,7 @@ func main() {
 		Serializer:                  &serializers.CBORSerializer{},
 		Authenticator:               NewAuthenticator(),
 		Router:                      r,
-		IceServers: []xconnwebrtc.ICEServer{
+		ICEServers: []xconnwebrtc.ICEServer{
 			{URLs: []string{"stun:stun.l.google.com:19302"}},
 		},
 	}
