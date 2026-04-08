@@ -30,6 +30,13 @@ func NewWebRTCHandler() *WebRTCProvider {
 	}
 }
 
+func (r *WebRTCProvider) UpdateICEServers(servers []ICEServer) {
+	r.Lock()
+	defer r.Unlock()
+
+	r.iceServers = cloneICEServers(servers)
+}
+
 func (r *WebRTCProvider) OnAnswerer(callback func(sessionID string, answerer *Answerer)) {
 	r.Lock()
 	defer r.Unlock()
@@ -204,7 +211,9 @@ func (r *WebRTCProvider) offerFunc(_ context.Context, invocation *xconn.Invocati
 		return xconn.NewInvocationError(wampproto.ErrInvalidArgument, fmt.Sprintf("invalid offer: %v", err))
 	}
 
+	r.Lock()
 	cfg := &AnswerConfig{ICEServers: cloneICEServers(r.iceServers)}
+	r.Unlock()
 	requestID := uuid.New().String()
 
 	answer, err := r.handleOffer(requestID, offer, cfg)
