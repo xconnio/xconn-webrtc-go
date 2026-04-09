@@ -3,6 +3,7 @@ package xconnwebrtc
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/pion/webrtc/v4"
 	log "github.com/sirupsen/logrus"
@@ -16,6 +17,7 @@ type ClientConfig struct {
 	ProcedureWebRTCOffer     string
 	TopicAnswererOnCandidate string
 	TopicOffererOnCandidate  string
+	ConnectTimeout           time.Duration
 	Serializer               xconn.SerializerSpec
 	Authenticator            auth.ClientAuthenticator
 	Session                  *xconn.Session
@@ -37,6 +39,9 @@ func (c *ClientConfig) validate() error {
 	}
 	if c.TopicOffererOnCandidate == "" {
 		return fmt.Errorf("TopicOffererOnCandidate must not be empty")
+	}
+	if c.ConnectTimeout <= 0 {
+		c.ConnectTimeout = 20 * time.Second
 	}
 	if c.Serializer == nil {
 		c.Serializer = xconn.JSONSerializerSpec
@@ -138,12 +143,60 @@ func connectWebRTC(config *ClientConfig) (*WebRTCSession, error) {
 		return nil, err
 	}
 
-	channel := <-offerer.WaitReady()
+	channel, err := waitForDataChannel(offerer.connection, offerer.WaitReady(), config.ConnectTimeout)
+	if err != nil {
+		if offerer.connection != nil {
+			_ = offerer.connection.Close()
+		}
+		return nil, err
+	}
 
 	return &WebRTCSession{
 		Channel:    channel,
 		Connection: offerer.connection,
 	}, nil
+}
+
+func waitForDataChannel(connection *webrtc.PeerConnection, ready <-chan *webrtc.DataChannel,
+	timeout time.Duration) (*webrtc.DataChannel, error) {
+	errCh := make(chan error, 1)
+	if connection != nil {
+		connection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+			switch state {
+			case webrtc.PeerConnectionStateFailed:
+				select {
+				case errCh <- fmt.Errorf("webrtc connection failed before data channel opened"):
+				default:
+				}
+			case webrtc.PeerConnectionStateDisconnected:
+				select {
+				case errCh <- fmt.Errorf("webrtc connection disconnected before data channel opened"):
+				default:
+				}
+			case webrtc.PeerConnectionStateClosed:
+				select {
+				case errCh <- fmt.Errorf("webrtc connection closed before data channel opened"):
+				default:
+				}
+			default:
+			}
+		})
+	}
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case channel := <-ready:
+		if channel == nil {
+			return nil, fmt.Errorf("webrtc data channel was not created")
+		}
+		return channel, nil
+	case err := <-errCh:
+		return nil, err
+	case <-timer.C:
+		return nil, fmt.Errorf("webrtc connection timed out after %s waiting for data channel", timeout)
+	}
 }
 
 func ConnectWebRTC(config *ClientConfig) (*WebRTCSession, error) {
