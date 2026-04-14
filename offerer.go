@@ -3,6 +3,7 @@ package xconnwebrtc
 import (
 	"encoding/json"
 	"sync"
+	"time"
 
 	"github.com/pion/webrtc/v4"
 	log "github.com/sirupsen/logrus"
@@ -29,9 +30,12 @@ func NewOfferer() *Offerer {
 }
 
 func (o *Offerer) Offer(offerConfig *OfferConfig) (*Offer, error) {
-	// Prepare the configuration
+	const trickleAfter = 100 * time.Millisecond
+	end := time.Now().Add(trickleAfter)
+
 	config := webrtc.Configuration{
-		ICEServers: offerConfig.ICEServers,
+		ICEServers:           offerConfig.ICEServers,
+		ICECandidatePoolSize: 10,
 	}
 
 	// Create a new RTCPeerConnection
@@ -41,7 +45,6 @@ func (o *Offerer) Offer(offerConfig *OfferConfig) (*Offer, error) {
 	}
 
 	o.connection = peerConnection
-	peerConnection.OnICECandidate(o.onICECandidate)
 
 	options := &webrtc.DataChannelInit{
 		Ordered:  &offerConfig.Ordered,
@@ -63,7 +66,31 @@ func (o *Offerer) Offer(offerConfig *OfferConfig) (*Offer, error) {
 		log.Debugf("Peer Connection State has changed: %s\n", s.String())
 	})
 
-	// Create a new offer
+	done := make(chan struct{}, 1)
+	var trickle bool
+	var initialCandidates []webrtc.ICECandidateInit
+
+	peerConnection.OnICECandidate(func(c *webrtc.ICECandidate) {
+		if c == nil {
+			return
+		}
+
+		if !trickle && !time.Now().After(end) {
+			initialCandidates = append(initialCandidates, c.ToJSON())
+			// First non-host candidate signals end of the fast host phase;
+			// everything after goes through the trickle path.
+			if c.Typ != webrtc.ICECandidateTypeHost {
+				trickle = true
+				select {
+				case done <- struct{}{}:
+				default:
+				}
+			}
+		} else {
+			o.handleICECandidate(c.ToJSON())
+		}
+	})
+
 	offer, err := peerConnection.CreateOffer(nil)
 	if err != nil {
 		return nil, err
@@ -75,8 +102,14 @@ func (o *Offerer) Offer(offerConfig *OfferConfig) (*Offer, error) {
 		return nil, err
 	}
 
+	select {
+	case <-done:
+	case <-time.After(time.Until(end)):
+	}
+
 	return &Offer{
 		Description: offer,
+		Candidates:  initialCandidates,
 	}, nil
 }
 
@@ -118,12 +151,20 @@ func (o *Offerer) WaitReady() chan *webrtc.DataChannel {
 	return o.channel
 }
 
-func (o *Offerer) onICECandidate(candidate *webrtc.ICECandidate) {
-	if candidate == nil {
+func (o *Offerer) handleICECandidate(candidate webrtc.ICECandidateInit) {
+	o.Lock()
+	canPublish := o.publishICECandidate != nil && o.trickleTopic != "" && o.trickleRequestID != ""
+	if !canPublish {
+		o.pendingCandidates = append(o.pendingCandidates, candidate)
+		o.Unlock()
 		return
 	}
 
-	o.handleICECandidate(candidate.ToJSON())
+	topic := o.trickleTopic
+	requestID := o.trickleRequestID
+	o.Unlock()
+
+	o.publishCandidate(topic, requestID, candidate)
 }
 
 func (o *Offerer) publishCandidate(topic string, requestID string, candidate webrtc.ICECandidateInit) {
@@ -143,20 +184,4 @@ func (o *Offerer) publishCandidate(topic string, requestID string, candidate web
 	if err := publish(topic, requestID, string(candidateData)); err != nil {
 		log.Errorf("failed to publish ice candidate: %v", err)
 	}
-}
-
-func (o *Offerer) handleICECandidate(candidate webrtc.ICECandidateInit) {
-	o.Lock()
-	canPublish := o.publishICECandidate != nil && o.trickleTopic != "" && o.trickleRequestID != ""
-	if !canPublish {
-		o.pendingCandidates = append(o.pendingCandidates, candidate)
-		o.Unlock()
-		return
-	}
-
-	topic := o.trickleTopic
-	requestID := o.trickleRequestID
-	o.Unlock()
-
-	o.publishCandidate(topic, requestID, candidate)
 }
