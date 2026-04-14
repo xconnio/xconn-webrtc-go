@@ -2,6 +2,7 @@ package xconnwebrtc
 
 import (
 	"fmt"
+	"net"
 
 	"github.com/pion/webrtc/v4"
 
@@ -95,4 +96,42 @@ type WebRTCSession struct {
 
 func (w *WebRTCSession) OpenChannel(label string, options *webrtc.DataChannelInit) (*webrtc.DataChannel, error) {
 	return w.Connection.CreateDataChannel(label, options)
+}
+
+func outboundIPs() []net.IP {
+	var ips []net.IP
+	if conn, err := net.Dial("udp4", "8.8.8.8:80"); err == nil {
+		ips = append(ips, conn.LocalAddr().(*net.UDPAddr).IP)
+		conn.Close()
+	}
+	if conn, err := net.Dial("udp6", "[2001:4860:4860::8888]:80"); err == nil {
+		ips = append(ips, conn.LocalAddr().(*net.UDPAddr).IP)
+		conn.Close()
+	}
+	return ips
+}
+
+func NewFilteredPeerConnection(iceServers []webrtc.ICEServer) (*webrtc.PeerConnection, error) {
+	config := webrtc.Configuration{
+		ICEServers:           iceServers,
+		ICECandidatePoolSize: 10,
+	}
+
+	s := webrtc.SettingEngine{}
+
+	routable := outboundIPs()
+	if len(routable) > 0 {
+		s.SetIPFilter(func(ip net.IP) bool {
+			for _, routableIP := range routable {
+				if ip.Equal(routableIP) {
+					return true
+				}
+			}
+			return false
+		})
+	}
+
+	api := webrtc.NewAPI(webrtc.WithSettingEngine(s))
+
+	return api.NewPeerConnection(config)
 }
