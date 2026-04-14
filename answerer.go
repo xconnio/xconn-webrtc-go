@@ -46,22 +46,6 @@ func (a *Answerer) Answer(answerConfig *AnswerConfig, offer Offer, trickleAfter 
 		return nil, err
 	}
 
-	for _, candidate := range offer.Candidates {
-		if err = connection.AddICECandidate(candidate); err != nil {
-			return nil, err
-		}
-	}
-
-	a.Lock()
-	for _, candidate := range a.cachedCandidates {
-		if err = connection.AddICECandidate(candidate); err != nil {
-			log.Errorf("failed to add ice candidate: %v", err)
-		}
-	}
-
-	a.cachedCandidates = nil
-	a.Unlock()
-
 	done := make(chan struct{})
 	var trickle = false
 	var initialCandidates []webrtc.ICECandidateInit
@@ -72,7 +56,12 @@ func (a *Answerer) Answer(answerConfig *AnswerConfig, offer Offer, trickleAfter 
 		}
 
 		if trickle || time.Now().After(end) {
-			a.onIceCandidate(candidate)
+			a.Lock()
+			cb := a.onIceCandidate
+			a.Unlock()
+			if cb != nil {
+				go cb(candidate)
+			}
 		} else {
 			initialCandidates = append(initialCandidates, candidate.ToJSON())
 			// host candidate gathering is done, any further candidates should
@@ -97,6 +86,21 @@ func (a *Answerer) Answer(answerConfig *AnswerConfig, offer Offer, trickleAfter 
 	if err = connection.SetLocalDescription(answer); err != nil {
 		return nil, err
 	}
+
+	for _, candidate := range offer.Candidates {
+		if err = connection.AddICECandidate(candidate); err != nil {
+			log.Errorf("failed to add offer ICE candidate: %v", err)
+		}
+	}
+
+	a.Lock()
+	for _, candidate := range a.cachedCandidates {
+		if err = connection.AddICECandidate(candidate); err != nil {
+			log.Errorf("failed to add cached ICE candidate: %v", err)
+		}
+	}
+	a.cachedCandidates = nil
+	a.Unlock()
 
 	select {
 	case <-done:
