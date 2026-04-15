@@ -28,12 +28,7 @@ func (a *Answerer) Answer(answerConfig *AnswerConfig, offer Offer, trickleAfter 
 	start := time.Now()
 	end := start.Add(trickleAfter)
 
-	config := webrtc.Configuration{
-		ICEServers:           answerConfig.ICEServers,
-		ICECandidatePoolSize: 10,
-	}
-
-	connection, err := webrtc.NewPeerConnection(config)
+	connection, err := NewFilteredPeerConnection(answerConfig.ICEServers)
 	if err != nil {
 		return nil, err
 	}
@@ -41,6 +36,10 @@ func (a *Answerer) Answer(answerConfig *AnswerConfig, offer Offer, trickleAfter 
 	a.Lock()
 	a.connection = connection
 	a.Unlock()
+
+	connection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+		log.Debugf("answerer ICE connection state: %s (+%s)", state, time.Since(start))
+	})
 
 	if err = connection.SetRemoteDescription(offer.Description); err != nil {
 		return nil, err
@@ -51,7 +50,7 @@ func (a *Answerer) Answer(answerConfig *AnswerConfig, offer Offer, trickleAfter 
 	var initialCandidates []webrtc.ICECandidateInit
 	connection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		if candidate == nil {
-			log.Debugf("ice candidates gathering took %s", time.Since(start))
+			log.Debugf("answerer ICE gathering complete (+%s)", time.Since(start))
 			return
 		}
 
@@ -68,7 +67,10 @@ func (a *Answerer) Answer(answerConfig *AnswerConfig, offer Offer, trickleAfter 
 			// be signaled with Trickle ICE.
 			if candidate.Typ != webrtc.ICECandidateTypeHost {
 				trickle = true
-				done <- struct{}{}
+				select {
+				case done <- struct{}{}:
+				default:
+				}
 			}
 		}
 	})

@@ -33,13 +33,7 @@ func (o *Offerer) Offer(offerConfig *OfferConfig) (*Offer, error) {
 	const trickleAfter = 100 * time.Millisecond
 	end := time.Now().Add(trickleAfter)
 
-	config := webrtc.Configuration{
-		ICEServers:           offerConfig.ICEServers,
-		ICECandidatePoolSize: 10,
-	}
-
-	// Create a new RTCPeerConnection
-	peerConnection, err := webrtc.NewPeerConnection(config)
+	peerConnection, err := NewFilteredPeerConnection(offerConfig.ICEServers)
 	if err != nil {
 		return nil, err
 	}
