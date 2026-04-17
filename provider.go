@@ -123,14 +123,14 @@ func (r *WebRTCProvider) Setup(config *ProviderConfig) error {
 		answerer.OnIceCandidate(func(candidate *webrtc.ICECandidate) {
 			answerData, err := json.Marshal(candidate.ToJSON())
 			if err != nil {
-				log.Errorf("failed to marshal answer: %v", err)
+				log.Debugf("failed to marshal answer: %v", err)
 				return
 			}
 
 			args := []any{sessionID, string(answerData)}
 			publishResp := config.Session.Publish(config.TopicPublishLocalCandidate).Args(args...).Do()
 			if publishResp.Err != nil {
-				log.Errorf("failed to publish answer: %v", publishResp.Err)
+				log.Debugf("failed to publish answer: %v", publishResp.Err)
 			}
 		})
 
@@ -138,11 +138,11 @@ func (r *WebRTCProvider) Setup(config *ProviderConfig) error {
 			select {
 			case channel := <-answerer.WaitReady():
 				if err := r.handleWAMPClient(sessionID, answerer, channel, config); err != nil {
-					log.Errorf("failed to handle answer: %v", err)
+					log.Debugf("failed to handle answer: %v", err)
 					r.removeAnswerer(sessionID, answerer)
 				}
 			case <-time.After(20 * time.Second):
-				log.Errorln("webrtc connection didn't establish after 20 seconds")
+				log.Debugln("webrtc connection didn't establish after 20 seconds")
 				r.removeAnswerer(sessionID, answerer)
 			}
 		}()
@@ -239,13 +239,13 @@ func (r *WebRTCProvider) onRemoteCandidate(event *xconn.Event) {
 
 	requestID, err := event.ArgString(0)
 	if err != nil {
-		log.Errorln("request ID must be a string")
+		log.Debugln("request ID must be a string")
 		return
 	}
 
 	candidateJSON, err := event.ArgString(1)
 	if err != nil {
-		log.Errorln("offer must be a string")
+		log.Debugln("offer must be a string")
 		return
 	}
 
@@ -255,7 +255,7 @@ func (r *WebRTCProvider) onRemoteCandidate(event *xconn.Event) {
 	}
 
 	if err := r.addIceCandidate(requestID, candidate); err != nil {
-		log.Errorf("failed to add ice candidate: %v", err)
+		log.Debugf("failed to add ice candidate: %v", err)
 		return
 	}
 }

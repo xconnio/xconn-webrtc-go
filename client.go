@@ -70,34 +70,34 @@ func connectWebRTC(config *ClientConfig) (*WebRTCSession, error) {
 
 	subscribeResponse := config.Session.Subscribe(config.TopicOffererOnCandidate, func(event *xconn.Event) {
 		if len(event.Args()) < 2 {
-			log.Errorf("invalid arguments length")
+			log.Debugf("invalid arguments length")
 			return
 		}
 
 		candidateRequestID, err := event.ArgString(0)
 		if err != nil {
-			log.Errorln("request ID must be a string")
+			log.Debugln("request ID must be a string")
 			return
 		}
 		if candidateRequestID != requestID {
-			log.Errorf("invalid requestID")
+			log.Debugf("invalid requestID")
 			return
 		}
 
 		candidateJSON, err := event.ArgString(1)
 		if err != nil {
-			log.Errorln("offer must be a string")
+			log.Debugln("offer must be a string")
 			return
 		}
 
 		var candidate webrtc.ICECandidateInit
 		if err := json.Unmarshal([]byte(candidateJSON), &candidate); err != nil {
-			log.Errorln(err)
+			log.Debugln(err)
 			return
 		}
 
 		if err = offerer.AddICECandidate(candidate); err != nil {
-			log.Errorln(err)
+			log.Debugln(err)
 		}
 	}).Do()
 	if subscribeResponse.Err != nil {
@@ -105,7 +105,7 @@ func connectWebRTC(config *ClientConfig) (*WebRTCSession, error) {
 	}
 	defer func() {
 		if err := subscribeResponse.Unsubscribe(); err != nil {
-			log.Errorf("failed to unsubscribe from offerer candidates: %v", err)
+			log.Debugf("failed to unsubscribe from offerer candidates: %v", err)
 		}
 	}()
 

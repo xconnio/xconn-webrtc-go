@@ -91,14 +91,14 @@ func (a *Answerer) Answer(answerConfig *AnswerConfig, offer Offer, trickleAfter 
 
 	for _, candidate := range offer.Candidates {
 		if err = connection.AddICECandidate(candidate); err != nil {
-			log.Errorf("failed to add offer ICE candidate: %v", err)
+			log.Debugf("failed to add offer ICE candidate: %v", err)
 		}
 	}
 
 	a.Lock()
 	for _, candidate := range a.cachedCandidates {
 		if err = connection.AddICECandidate(candidate); err != nil {
-			log.Errorf("failed to add cached ICE candidate: %v", err)
+			log.Debugf("failed to add cached ICE candidate: %v", err)
 		}
 	}
 	a.cachedCandidates = nil

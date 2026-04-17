@@ -10,11 +10,23 @@ import (
 	"github.com/xconnio/xconn-go"
 )
 
+const (
+	// maxBufferedAmount is how many bytes may sit in pion's send buffer before
+	// write blocks. Keeps memory bounded during large transfers.
+	maxBufferedAmount = 512 * 1024 // 512 KB
+
+	// bufferedAmountLow is the threshold at which pion fires OnBufferedAmountLow,
+	// unblocking write to send more chunks.
+	bufferedAmountLow = 256 * 1024 // 256 KB
+)
+
 type WebRTCPeer struct {
 	channel *webrtc.DataChannel
 
 	messageChan chan []byte
 	assembler   *WebRTCMessageAssembler
+
+	sendReady chan struct{}
 
 	done      chan struct{}
 	closeOnce sync.Once
@@ -29,8 +41,18 @@ func NewWebRTCPeer(channel *webrtc.DataChannel) xconn.Peer {
 		channel:     channel,
 		messageChan: messageChan,
 		assembler:   assembler,
+		sendReady:   make(chan struct{}, 1),
 		done:        make(chan struct{}),
 	}
+
+	channel.SetBufferedAmountLowThreshold(bufferedAmountLow)
+	channel.OnBufferedAmountLow(func() {
+		select {
+		case peer.sendReady <- struct{}{}:
+		default:
+		}
+	})
+
 	channel.OnMessage(func(msg webrtc.DataChannelMessage) {
 		toSend := assembler.Feed(msg.Data)
 		if toSend == nil {
@@ -65,6 +87,14 @@ func (w *WebRTCPeer) Read() ([]byte, error) {
 
 func (w *WebRTCPeer) Write(bytes []byte) error {
 	for chunk := range w.assembler.ChunkMessage(bytes) {
+		for w.channel.BufferedAmount()+uint64(len(chunk)) > maxBufferedAmount {
+			select {
+			case <-w.sendReady:
+			case <-w.done:
+				return io.ErrClosedPipe
+			}
+		}
+
 		if err := w.channel.Send(chunk); err != nil {
 			return err
 		}
