@@ -164,7 +164,7 @@ func (o *Offerer) handleICECandidate(candidate webrtc.ICECandidateInit) {
 func (o *Offerer) publishCandidate(topic string, requestID string, candidate webrtc.ICECandidateInit) {
 	candidateData, err := json.Marshal(candidate)
 	if err != nil {
-		log.Errorf("failed to marshal candidate: %v", err)
+		log.Debugf("failed to marshal candidate: %v", err)
 		return
 	}
 
@@ -176,6 +176,6 @@ func (o *Offerer) publishCandidate(topic string, requestID string, candidate web
 	}
 
 	if err := publish(topic, requestID, string(candidateData)); err != nil {
-		log.Errorf("failed to publish ice candidate: %v", err)
+		log.Debugf("failed to publish ice candidate: %v", err)
 	}
 }
