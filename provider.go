@@ -153,31 +153,33 @@ func (r *WebRTCProvider) Setup(config *ProviderConfig) error {
 
 func (r *WebRTCProvider) handleWAMPClient(sessionID string, answerer *Answerer,
 	channel *webrtc.DataChannel, config *ProviderConfig) error {
-	defer r.removeAnswerer(sessionID, answerer)
 
 	rtcPeer := NewWebRTCPeer(channel)
 
 	hello, err := xconn.ReadHello(rtcPeer, config.Serializer)
 	if err != nil {
+		r.removeAnswerer(sessionID, answerer)
 		return err
 	}
 
 	base, err := xconn.Accept(rtcPeer, hello, config.Serializer, config.Authenticator)
 	if err != nil {
+		r.removeAnswerer(sessionID, answerer)
 		return err
 	}
 
 	if config.Router == nil {
+		r.removeAnswerer(sessionID, answerer)
 		return nil
 	}
 
 	if err = config.Router.AttachClient(base); err != nil {
+		r.removeAnswerer(sessionID, answerer)
 		return fmt.Errorf("failed to attach client %w", err)
 	}
 
 	channel.OnClose(func() {
 		_ = base.Close()
-		r.removeAnswerer(sessionID, answerer)
 	})
 
 	for {
