@@ -94,8 +94,15 @@ type WebRTCSession struct {
 	Channel    *webrtc.DataChannel
 }
 
+// OpenChannel opens a new data channel over the existing peer connection.
+// The label identifies the channel's purpose (e.g. "file-transfer").
 func (w *WebRTCSession) OpenChannel(label string, options *webrtc.DataChannelInit) (*webrtc.DataChannel, error) {
 	return w.Connection.CreateDataChannel(label, options)
+}
+
+// OnDataChannel registers a callback for data channels opened by the remote peer.
+func (w *WebRTCSession) OnDataChannel(callback func(channel *webrtc.DataChannel)) {
+	w.Connection.OnDataChannel(callback)
 }
 
 func outboundIPs() []net.IP {

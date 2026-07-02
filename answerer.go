@@ -2,6 +2,7 @@ package xconnwebrtc
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pion/webrtc/v4"
@@ -9,19 +10,35 @@ import (
 )
 
 type Answerer struct {
-	connection *webrtc.PeerConnection
-	channel    chan *webrtc.DataChannel
+	connection  *webrtc.PeerConnection
+	wampChannel chan *webrtc.DataChannel
 
-	onIceCandidate   func(candidate *webrtc.ICECandidate)
-	cachedCandidates []webrtc.ICECandidateInit
+	// onExtraDataChannel receives every data channel after the first (WAMP) one.
+	onExtraDataChannel func(channel *webrtc.DataChannel)
+	onIceCandidate     func(candidate *webrtc.ICECandidate)
+	cachedCandidates   []webrtc.ICECandidateInit
 
 	sync.Mutex
 }
 
 func NewAnswerer() *Answerer {
 	return &Answerer{
-		channel: make(chan *webrtc.DataChannel, 1),
+		wampChannel: make(chan *webrtc.DataChannel, 1),
 	}
+}
+
+// OnExtraDataChannel registers a callback fired for every data channel opened
+// after the first one, i.e. every channel that isn't the WAMP channel. The
+// callback runs synchronously on pion's data-channel accept path: pion doesn't
+// start delivering messages on the channel, or accept any further channels on
+// the connection, until it returns (see sctptransport.go's ACCEPT loop). So the
+// callback must register any handlers it needs (e.g. OnMessage) immediately
+// and return promptly, deferring actual work to a goroutine of its own.
+func (a *Answerer) OnExtraDataChannel(callback func(channel *webrtc.DataChannel)) {
+	a.Lock()
+	defer a.Unlock()
+
+	a.onExtraDataChannel = callback
 }
 
 func (a *Answerer) Answer(answerConfig *AnswerConfig, offer Offer, trickleAfter time.Duration) (*Answer, error) {
@@ -75,9 +92,25 @@ func (a *Answerer) Answer(answerConfig *AnswerConfig, offer Offer, trickleAfter 
 		}
 	})
 
-	var once sync.Once
+	// The first data channel opened on the connection is the WAMP channel by
+	// convention; every subsequent channel is handed to onExtraDataChannel.
+	var wampAssigned atomic.Bool
 	connection.OnDataChannel(func(d *webrtc.DataChannel) {
-		once.Do(func() { a.channel <- d })
+		if wampAssigned.CompareAndSwap(false, true) {
+			select {
+			case a.wampChannel <- d:
+			default:
+				log.Debugf("answerer: WAMP channel slot occupied, dropping extra channel %q", d.Label())
+			}
+			return
+		}
+
+		a.Lock()
+		cb := a.onExtraDataChannel
+		a.Unlock()
+		if cb != nil {
+			cb(d)
+		}
 	})
 
 	answer, err := connection.CreateAnswer(nil)
@@ -135,5 +168,12 @@ func (a *Answerer) AddICECandidate(candidate webrtc.ICECandidateInit) error {
 }
 
 func (a *Answerer) WaitReady() chan *webrtc.DataChannel {
-	return a.channel
+	return a.wampChannel
+}
+
+// Connection returns the underlying PeerConnection, or nil if not yet established.
+func (a *Answerer) Connection() *webrtc.PeerConnection {
+	a.Lock()
+	defer a.Unlock()
+	return a.connection
 }
