@@ -50,6 +50,8 @@ func (o *Offerer) Offer(offerConfig *OfferConfig) (*Offer, error) {
 		return nil, err
 	}
 
+	// This is the first data channel created on the connection, so it is the WAMP
+	// channel by convention; no handshake is needed to identify it as such.
 	dc.OnOpen(func() {
 		o.channel <- dc
 	})

@@ -18,6 +18,8 @@ import (
 type WebRTCProvider struct {
 	answerers     map[string]*Answerer
 	onNewAnswerer func(sessionID string, answerer *Answerer)
+	// onDataChannel receives every data channel opened after the WAMP channel.
+	onDataChannel func(sessionID string, channel *webrtc.DataChannel)
 
 	iceServers []webrtc.ICEServer
 
@@ -42,6 +44,17 @@ func (r *WebRTCProvider) OnAnswerer(callback func(sessionID string, answerer *An
 	defer r.Unlock()
 
 	r.onNewAnswerer = callback
+}
+
+// OnDataChannel registers a callback that fires for every data channel opened
+// by a client after the first (WAMP) channel. See Answerer.OnExtraDataChannel:
+// the callback must register any handlers it needs and return promptly,
+// deferring actual work to a goroutine of its own.
+func (r *WebRTCProvider) OnDataChannel(callback func(sessionID string, channel *webrtc.DataChannel)) {
+	r.Lock()
+	defer r.Unlock()
+
+	r.onDataChannel = callback
 }
 
 func (r *WebRTCProvider) ensureAnswerer(sessionID string) *Answerer {
@@ -93,9 +106,10 @@ func (r *WebRTCProvider) handleOffer(requestID string, offer Offer, answerConfig
 	if answerer.connection != nil {
 		answerer.connection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 			switch state {
-			case webrtc.PeerConnectionStateDisconnected, webrtc.PeerConnectionStateFailed,
-				webrtc.PeerConnectionStateClosed:
+			case webrtc.PeerConnectionStateFailed, webrtc.PeerConnectionStateClosed:
 				r.removeAnswerer(requestID, answerer)
+			case webrtc.PeerConnectionStateDisconnected:
+				log.Debugf("peer connection disconnected for %s; keeping answerer alive for recovery", requestID)
 			default:
 			}
 		})
@@ -131,6 +145,15 @@ func (r *WebRTCProvider) Setup(config *ProviderConfig) error {
 			publishResp := config.Session.Publish(config.TopicPublishLocalCandidate).Args(args...).Do()
 			if publishResp.Err != nil {
 				log.Debugf("failed to publish answer: %v", publishResp.Err)
+			}
+		})
+
+		answerer.OnExtraDataChannel(func(channel *webrtc.DataChannel) {
+			r.Lock()
+			cb := r.onDataChannel
+			r.Unlock()
+			if cb != nil {
+				cb(sessionID, channel)
 			}
 		})
 

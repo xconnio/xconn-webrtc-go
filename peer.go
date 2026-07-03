@@ -12,7 +12,7 @@ import (
 
 const (
 	// maxBufferedAmount is how many bytes may sit in pion's send buffer before
-	// write blocks. Keeps memory bounded during large transfers.
+	// write blocks.
 	maxBufferedAmount = 512 * 1024 // 512 KB
 
 	// bufferedAmountLow is the threshold at which pion fires OnBufferedAmountLow,

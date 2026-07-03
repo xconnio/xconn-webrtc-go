@@ -246,7 +246,7 @@ func ConnectWAMP(config *ClientConfig) (*xconn.Session, error) {
 	return wampSession, nil
 }
 
-func ConnectWAMPAndWebRTC(config *ClientConfig) (*xconn.Session, *webrtc.DataChannel, error) {
+func ConnectWAMPAndWebRTC(config *ClientConfig) (*xconn.Session, *WebRTCSession, error) {
 	webRTCConnection, err := connectWebRTC(config)
 	if err != nil {
 		return nil, nil, err
@@ -259,7 +259,19 @@ func ConnectWAMPAndWebRTC(config *ClientConfig) (*xconn.Session, *webrtc.DataCha
 		return nil, nil, err
 	}
 
+	webRTCConnection.Channel.OnClose(func() {
+		_ = base.Close()
+	})
+
+	webRTCConnection.Connection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+		switch state {
+		case webrtc.PeerConnectionStateDisconnected, webrtc.PeerConnectionStateFailed, webrtc.PeerConnectionStateClosed:
+			_ = base.Close()
+		default:
+		}
+	})
+
 	wampSession := xconn.NewSession(base, config.Serializer.Serializer())
 
-	return wampSession, webRTCConnection.Channel, nil
+	return wampSession, webRTCConnection, nil
 }
