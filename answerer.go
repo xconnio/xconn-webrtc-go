@@ -64,7 +64,7 @@ func (a *Answerer) Answer(answerConfig *AnswerConfig, offer Offer, trickleAfter 
 
 	done := make(chan struct{})
 	var trickle = false
-	var initialCandidates []webrtc.ICECandidateInit
+	initialCandidates := []webrtc.ICECandidateInit{}
 	connection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		if candidate == nil {
 			log.Debugf("answerer ICE gathering complete (+%s)", time.Since(start))
