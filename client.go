@@ -22,6 +22,8 @@ type ClientConfig struct {
 	Authenticator            auth.ClientAuthenticator
 	Session                  *xconn.Session
 	ICEServers               []webrtc.ICEServer
+
+	OnDisconnect func()
 }
 
 func (c *ClientConfig) validate() error {
@@ -237,6 +239,9 @@ func ConnectWAMP(config *ClientConfig) (*xconn.Session, error) {
 		switch state {
 		case webrtc.PeerConnectionStateDisconnected, webrtc.PeerConnectionStateFailed, webrtc.PeerConnectionStateClosed:
 			_ = base.Close()
+			if config.OnDisconnect != nil {
+				config.OnDisconnect()
+			}
 		default:
 		}
 	})
@@ -267,6 +272,9 @@ func ConnectWAMPAndWebRTC(config *ClientConfig) (*xconn.Session, *WebRTCSession,
 		switch state {
 		case webrtc.PeerConnectionStateDisconnected, webrtc.PeerConnectionStateFailed, webrtc.PeerConnectionStateClosed:
 			_ = base.Close()
+			if config.OnDisconnect != nil {
+				config.OnDisconnect()
+			}
 		default:
 		}
 	})
