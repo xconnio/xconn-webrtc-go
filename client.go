@@ -3,6 +3,7 @@ package xconnwebrtc
 import (
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/pion/webrtc/v4"
@@ -11,6 +12,11 @@ import (
 	"github.com/xconnio/wampproto-go/auth"
 	"github.com/xconnio/xconn-go"
 )
+
+type pendingRemoteCandidate struct {
+	requestID string
+	candidate webrtc.ICECandidateInit
+}
 
 type ClientConfig struct {
 	Realm                    string
@@ -62,7 +68,11 @@ func connectWebRTC(config *ClientConfig) (*WebRTCSession, error) {
 		return nil, fmt.Errorf("invalid client config: %w", err)
 	}
 	offerer := NewOfferer()
-	var requestID string
+	var (
+		mu                sync.Mutex
+		requestID         string
+		pendingCandidates []pendingRemoteCandidate
+	)
 	offerConfig := &OfferConfig{
 		Protocol:                 config.Serializer.SubProtocol(),
 		ICEServers:               cloneICEServers(config.ICEServers),
@@ -81,10 +91,6 @@ func connectWebRTC(config *ClientConfig) (*WebRTCSession, error) {
 			log.Debugln("request ID must be a string")
 			return
 		}
-		if candidateRequestID != requestID {
-			log.Debugf("invalid requestID")
-			return
-		}
 
 		candidateJSON, err := event.ArgString(1)
 		if err != nil {
@@ -95,6 +101,23 @@ func connectWebRTC(config *ClientConfig) (*WebRTCSession, error) {
 		var candidate webrtc.ICECandidateInit
 		if err := json.Unmarshal([]byte(candidateJSON), &candidate); err != nil {
 			log.Debugln(err)
+			return
+		}
+
+		mu.Lock()
+		if requestID == "" {
+			pendingCandidates = append(pendingCandidates, pendingRemoteCandidate{
+				requestID: candidateRequestID,
+				candidate: candidate,
+			})
+			mu.Unlock()
+			return
+		}
+		match := candidateRequestID == requestID
+		mu.Unlock()
+
+		if !match {
+			log.Debugf("invalid requestID")
 			return
 		}
 
@@ -134,9 +157,23 @@ func connectWebRTC(config *ClientConfig) (*WebRTCSession, error) {
 	if err = json.Unmarshal([]byte(offerResponseText), &offerResponse); err != nil {
 		return nil, err
 	}
-	requestID = offerResponse.RequestID
-	if requestID == "" {
+	if offerResponse.RequestID == "" {
 		return nil, fmt.Errorf("offer response request ID must not be empty")
+	}
+
+	mu.Lock()
+	requestID = offerResponse.RequestID
+	buffered := pendingCandidates
+	pendingCandidates = nil
+	mu.Unlock()
+
+	for _, pc := range buffered {
+		if pc.requestID != requestID {
+			continue
+		}
+		if err = offerer.AddICECandidate(pc.candidate); err != nil {
+			log.Debugln(err)
+		}
 	}
 
 	offerer.StartICETrickle(config.Session, offerConfig.TopicAnswererOnCandidate, requestID)

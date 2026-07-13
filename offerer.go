@@ -63,6 +63,7 @@ func (o *Offerer) Offer(offerConfig *OfferConfig) (*Offer, error) {
 	})
 
 	done := make(chan struct{}, 1)
+	var candMu sync.Mutex
 	var trickle bool
 	var initialCandidates []webrtc.ICECandidateInit
 
@@ -71,20 +72,26 @@ func (o *Offerer) Offer(offerConfig *OfferConfig) (*Offer, error) {
 			return
 		}
 
+		candMu.Lock()
 		if !trickle && !time.Now().After(end) {
 			initialCandidates = append(initialCandidates, c.ToJSON())
 			// First non-host candidate signals end of the fast host phase;
 			// everything after goes through the trickle path.
 			if c.Typ != webrtc.ICECandidateTypeHost {
 				trickle = true
+				candMu.Unlock()
 				select {
 				case done <- struct{}{}:
 				default:
 				}
+				return
 			}
-		} else {
-			o.handleICECandidate(c.ToJSON())
+			candMu.Unlock()
+			return
 		}
+		candMu.Unlock()
+
+		o.handleICECandidate(c.ToJSON())
 	})
 
 	offer, err := peerConnection.CreateOffer(nil)
@@ -103,9 +110,13 @@ func (o *Offerer) Offer(offerConfig *OfferConfig) (*Offer, error) {
 	case <-time.After(time.Until(end)):
 	}
 
+	candMu.Lock()
+	resultCandidates := initialCandidates
+	candMu.Unlock()
+
 	return &Offer{
 		Description: offer,
-		Candidates:  initialCandidates,
+		Candidates:  resultCandidates,
 	}, nil
 }
 
