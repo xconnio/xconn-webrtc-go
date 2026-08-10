@@ -158,6 +158,11 @@ func (o *Offerer) WaitReady() chan *webrtc.DataChannel {
 	return o.channel
 }
 
+// Connection returns the underlying PeerConnection, or nil if not yet established.
+func (o *Offerer) Connection() *webrtc.PeerConnection {
+	return o.connection
+}
+
 func (o *Offerer) handleICECandidate(candidate webrtc.ICECandidateInit) {
 	o.Lock()
 	canPublish := o.publishICECandidate != nil && o.trickleTopic != "" && o.trickleRequestID != ""

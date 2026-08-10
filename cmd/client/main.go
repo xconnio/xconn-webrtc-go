@@ -34,10 +34,10 @@ func main() {
 			{URLs: []string{"stun:stun.l.google.com:19302"}},
 		},
 	}
-	webRTCSession, err := xconnwebrtc.ConnectWebRTC(config)
+	webRTCSession, err := xconnwebrtc.ConnectWAMP(config)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	log.Println(webRTCSession)
+	log.Println(webRTCSession.ID())
 }
