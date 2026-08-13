@@ -6,6 +6,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/pion/ice/v4"
 	"github.com/pion/webrtc/v4"
 
 	"github.com/xconnio/wampproto-go/auth"
@@ -213,6 +214,7 @@ func NewFilteredPeerConnection(iceServers []webrtc.ICEServer) (*webrtc.PeerConne
 	}
 
 	s := webrtc.SettingEngine{}
+	s.SetICEMulticastDNSMode(ice.MulticastDNSModeDisabled)
 
 	routable := outboundIPs()
 	if len(routable) > 0 {
