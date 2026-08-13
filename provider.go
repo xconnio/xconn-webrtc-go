@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,14 +13,15 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xconnio/wampproto-go"
+	"github.com/xconnio/wampproto-go/serializers"
 	"github.com/xconnio/xconn-go"
 )
 
 type WebRTCProvider struct {
 	answerers     map[string]*Answerer
 	onNewAnswerer func(sessionID string, answerer *Answerer)
-	// onDataChannel receives every data channel opened after the WAMP channel.
-	onDataChannel func(sessionID string, channel *webrtc.DataChannel)
+	// onDataChannel receives every data channel that isn't a WAMP session.
+	onDataChannel func(sessionID string, channel *webrtc.DataChannel, firstMessage []byte)
 
 	iceServers []webrtc.ICEServer
 
@@ -47,10 +49,9 @@ func (r *WebRTCProvider) OnAnswerer(callback func(sessionID string, answerer *An
 }
 
 // OnDataChannel registers a callback that fires for every data channel opened
-// by a client after the first (WAMP) channel. See Answerer.OnExtraDataChannel:
-// the callback must register any handlers it needs and return promptly,
-// deferring actual work to a goroutine of its own.
-func (r *WebRTCProvider) OnDataChannel(callback func(sessionID string, channel *webrtc.DataChannel)) {
+// by a client that isn't a WAMP session.
+func (r *WebRTCProvider) OnDataChannel(callback func(sessionID string,
+	channel *webrtc.DataChannel, firstMessage []byte)) {
 	r.Lock()
 	defer r.Unlock()
 
@@ -148,23 +149,36 @@ func (r *WebRTCProvider) Setup(config *ProviderConfig) error {
 			}
 		})
 
-		answerer.OnExtraDataChannel(func(channel *webrtc.DataChannel) {
+		answerer.OnDataChannel(func(channel *webrtc.DataChannel, firstMessage []byte) {
 			r.Lock()
 			cb := r.onDataChannel
 			r.Unlock()
 			if cb != nil {
-				cb(sessionID, channel)
+				cb(sessionID, channel, firstMessage)
 			}
 		})
 
-		go func() {
-			select {
-			case channel := <-answerer.WaitReady():
-				if err := r.handleWAMPClient(sessionID, answerer, channel, config); err != nil {
-					log.Debugf("failed to handle answer: %v", err)
-					r.removeAnswerer(sessionID, answerer)
+		var sessionEstablished atomic.Bool
+		answerer.OnWAMPDataChannel(func(channel *webrtc.DataChannel, serializer serializers.Serializer) {
+			sessionEstablished.Store(true)
+
+			// NewWebRTCPeer must run synchronously here, before this callback
+			// returns: it registers channel.OnMessage, and pion won't start
+			// delivering messages on the channel until this callback returns
+			// (see OnDataChannel's doc comment). Deferring it into the
+			// goroutine below would race the client's HELLO against handler
+			// registration and could silently drop it.
+			rtcPeer := NewWebRTCPeer(channel)
+			go func() {
+				if err := r.handleWAMPClient(sessionID, channel, rtcPeer, serializer, config); err != nil {
+					log.Debugf("failed to handle WAMP data channel for session %s: %v", sessionID, err)
 				}
-			case <-time.After(20 * time.Second):
+			}()
+		})
+
+		go func() {
+			<-time.After(20 * time.Second)
+			if !sessionEstablished.Load() {
 				log.Debugln("webrtc connection didn't establish after 20 seconds")
 				r.removeAnswerer(sessionID, answerer)
 			}
@@ -174,30 +188,28 @@ func (r *WebRTCProvider) Setup(config *ProviderConfig) error {
 	return nil
 }
 
-func (r *WebRTCProvider) handleWAMPClient(sessionID string, answerer *Answerer,
-	channel *webrtc.DataChannel, config *ProviderConfig) error {
+// handleWAMPClient runs one WAMP session on channel: RawSocket-equivalent
+// HELLO/WELCOME handshake, router attach, message loop. A connection can host
+// several concurrent sessions (see OnWAMPDataChannel), so a failure here must
+// only tear down this session, not the whole PeerConnection/Answerer.
+func (r *WebRTCProvider) handleWAMPClient(sessionID string, channel *webrtc.DataChannel,
+	rtcPeer xconn.Peer, serializer serializers.Serializer, config *ProviderConfig) error {
 
-	rtcPeer := NewWebRTCPeer(channel)
-
-	hello, err := xconn.ReadHello(rtcPeer, config.Serializer)
+	hello, err := xconn.ReadHello(rtcPeer, serializer)
 	if err != nil {
-		r.removeAnswerer(sessionID, answerer)
 		return err
 	}
 
-	base, err := xconn.Accept(rtcPeer, hello, config.Serializer, config.Authenticator)
+	base, err := xconn.Accept(rtcPeer, hello, serializer, config.Authenticator)
 	if err != nil {
-		r.removeAnswerer(sessionID, answerer)
 		return err
 	}
 
 	if config.Router == nil {
-		r.removeAnswerer(sessionID, answerer)
 		return nil
 	}
 
 	if err = config.Router.AttachClient(base); err != nil {
-		r.removeAnswerer(sessionID, answerer)
 		return fmt.Errorf("failed to attach client %w", err)
 	}
 
@@ -213,7 +225,7 @@ func (r *WebRTCProvider) handleWAMPClient(sessionID string, answerer *Answerer,
 		}
 
 		if err = config.Router.ReceiveMessage(base, msg); err != nil {
-			log.Println(err)
+			log.Debugf("failed to receive message for session %s: %v", sessionID, err)
 			return nil
 		}
 	}

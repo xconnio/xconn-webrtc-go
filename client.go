@@ -63,9 +63,12 @@ func (c *ClientConfig) validate() error {
 	return nil
 }
 
-func connectWebRTC(config *ClientConfig) (*WebRTCSession, error) {
+// connectWebRTC runs the offer/answer/ICE exchange and returns the resulting
+// PeerConnection and its first (signaling) DataChannel, before any WAMP
+// handshake or join happens on it.
+func connectWebRTC(config *ClientConfig) (*webrtc.PeerConnection, *webrtc.DataChannel, error) {
 	if err := config.validate(); err != nil {
-		return nil, fmt.Errorf("invalid client config: %w", err)
+		return nil, nil, fmt.Errorf("invalid client config: %w", err)
 	}
 	offerer := NewOfferer()
 	var (
@@ -74,7 +77,6 @@ func connectWebRTC(config *ClientConfig) (*WebRTCSession, error) {
 		pendingCandidates []pendingRemoteCandidate
 	)
 	offerConfig := &OfferConfig{
-		Protocol:                 config.Serializer.SubProtocol(),
 		ICEServers:               cloneICEServers(config.ICEServers),
 		Ordered:                  true,
 		TopicAnswererOnCandidate: config.TopicAnswererOnCandidate,
@@ -126,7 +128,7 @@ func connectWebRTC(config *ClientConfig) (*WebRTCSession, error) {
 		}
 	}).Do()
 	if subscribeResponse.Err != nil {
-		return nil, subscribeResponse.Err
+		return nil, nil, subscribeResponse.Err
 	}
 	defer func() {
 		if err := subscribeResponse.Unsubscribe(); err != nil {
@@ -136,29 +138,29 @@ func connectWebRTC(config *ClientConfig) (*WebRTCSession, error) {
 
 	offer, err := offerer.Offer(offerConfig)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	offerJSON, err := json.Marshal(offer)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	callResponse := config.Session.Call(config.ProcedureWebRTCOffer).Args(string(offerJSON)).Do()
 	if callResponse.Err != nil {
-		return nil, callResponse.Err
+		return nil, nil, callResponse.Err
 	}
 
 	offerResponseText, err := callResponse.ArgString(0)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var offerResponse OfferResponse
 	if err = json.Unmarshal([]byte(offerResponseText), &offerResponse); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if offerResponse.RequestID == "" {
-		return nil, fmt.Errorf("offer response request ID must not be empty")
+		return nil, nil, fmt.Errorf("offer response request ID must not be empty")
 	}
 
 	mu.Lock()
@@ -179,7 +181,7 @@ func connectWebRTC(config *ClientConfig) (*WebRTCSession, error) {
 	offerer.StartICETrickle(config.Session, offerConfig.TopicAnswererOnCandidate, requestID)
 
 	if err = offerer.HandleAnswer(offerResponse.Answer); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	channel, err := waitForDataChannel(offerer.connection, offerer.WaitReady(), config.ConnectTimeout)
@@ -187,13 +189,10 @@ func connectWebRTC(config *ClientConfig) (*WebRTCSession, error) {
 		if offerer.connection != nil {
 			_ = offerer.connection.Close()
 		}
-		return nil, err
+		return nil, nil, err
 	}
 
-	return &WebRTCSession{
-		Channel:    channel,
-		Connection: offerer.connection,
-	}, nil
+	return offerer.connection, channel, nil
 }
 
 func waitForDataChannel(connection *webrtc.PeerConnection, ready <-chan *webrtc.DataChannel,
@@ -238,85 +237,67 @@ func waitForDataChannel(connection *webrtc.PeerConnection, ready <-chan *webrtc.
 	}
 }
 
-func ConnectWebRTC(config *ClientConfig) (*WebRTCSession, error) {
-	webRTCSession, err := connectWebRTC(config)
+// ConnectWAMP establishes a WebRTC PeerConnection and joins realm over its
+// first DataChannel, returning a *WebRTCSession. Since WebRTCSession extends
+// *xconn.Session, the result is immediately usable for WAMP calls, and also
+// exposes the underlying connection for opening more sessions or raw data
+// channels (see WebRTCSession.OpenSession / OpenChannel / OnDataChannel).
+func ConnectWAMP(config *ClientConfig) (*WebRTCSession, error) {
+	connection, channel, err := connectWebRTC(config)
 	if err != nil {
 		return nil, err
 	}
 
-	peer := NewWebRTCPeer(webRTCSession.Channel)
-	_, err = xconn.Join(peer, config.Realm, config.Serializer.Serializer(), config.Authenticator)
+	session, err := joinWebRTCSession(connection, channel, config.Realm,
+		config.Serializer, config.Authenticator, config.ConnectTimeout)
+	if err != nil {
+		if connection != nil {
+			_ = connection.Close()
+		}
+		return nil, err
+	}
+
+	// Closing this session's own channel (handled inside joinWebRTCSession)
+	// already covers connection failure, since pion cascades the failure to
+	// every channel's own read loop. This handler only needs to surface the
+	// connection-level OnDisconnect callback.
+	connection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+		switch state {
+		case webrtc.PeerConnectionStateDisconnected, webrtc.PeerConnectionStateFailed, webrtc.PeerConnectionStateClosed:
+			if config.OnDisconnect != nil {
+				config.OnDisconnect()
+			}
+		default:
+		}
+	})
+
+	return session, nil
+}
+
+// joinWebRTCSession performs the magic-byte handshake and WAMP join over an
+// already-open channel, wrapping the result in a WebRTCSession that shares
+// connection. Used both for a brand new PeerConnection's first channel and
+// for additional channels opened via WebRTCSession.OpenSession.
+func joinWebRTCSession(connection *webrtc.PeerConnection, channel *webrtc.DataChannel, realm string,
+	spec xconn.SerializerSpec, authenticator auth.ClientAuthenticator, timeout time.Duration) (*WebRTCSession, error) {
+
+	if err := sendClientHandshake(channel, spec, timeout); err != nil {
+		return nil, err
+	}
+
+	peer := NewWebRTCPeer(channel)
+	base, err := xconn.Join(peer, realm, spec.Serializer(), authenticator)
 	if err != nil {
 		return nil, err
 	}
+
+	channel.OnClose(func() {
+		_ = base.Close()
+	})
 
 	return &WebRTCSession{
-		Channel:    webRTCSession.Channel,
-		Connection: webRTCSession.Connection,
+		Session:    xconn.NewSession(base, spec.Serializer()),
+		connection: connection,
+		channel:    channel,
 	}, nil
-}
-
-func ConnectWAMP(config *ClientConfig) (*xconn.Session, error) {
-	webRTCConnection, err := connectWebRTC(config)
-	if err != nil {
-		return nil, err
-	}
-
-	peer := NewWebRTCPeer(webRTCConnection.Channel)
-	base, err := xconn.Join(peer, config.Realm, config.Serializer.Serializer(), config.Authenticator)
-	if err != nil {
-		return nil, err
-	}
-
-	webRTCConnection.Channel.OnClose(func() {
-		_ = base.Close()
-	})
-
-	webRTCConnection.Connection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-		switch state {
-		case webrtc.PeerConnectionStateDisconnected, webrtc.PeerConnectionStateFailed, webrtc.PeerConnectionStateClosed:
-			_ = base.Close()
-			if config.OnDisconnect != nil {
-				config.OnDisconnect()
-			}
-		default:
-		}
-	})
-
-	wampSession := xconn.NewSession(base, config.Serializer.Serializer())
-
-	return wampSession, nil
-}
-
-func ConnectWAMPAndWebRTC(config *ClientConfig) (*xconn.Session, *WebRTCSession, error) {
-	webRTCConnection, err := connectWebRTC(config)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	peer := NewWebRTCPeer(webRTCConnection.Channel)
-
-	base, err := xconn.Join(peer, config.Realm, config.Serializer.Serializer(), config.Authenticator)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	webRTCConnection.Channel.OnClose(func() {
-		_ = base.Close()
-	})
-
-	webRTCConnection.Connection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-		switch state {
-		case webrtc.PeerConnectionStateDisconnected, webrtc.PeerConnectionStateFailed, webrtc.PeerConnectionStateClosed:
-			_ = base.Close()
-			if config.OnDisconnect != nil {
-				config.OnDisconnect()
-			}
-		default:
-		}
-	})
-
-	wampSession := xconn.NewSession(base, config.Serializer.Serializer())
-
-	return wampSession, webRTCConnection, nil
 }
