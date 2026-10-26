@@ -27,6 +27,10 @@ type WebRTCPeer struct {
 	assembler   *WebRTCMessageAssembler
 
 	sendReady chan struct{}
+	// writeMu keeps a message's chunks together on the channel: the receiving
+	// assembler appends every chunk it gets to the message in progress, so
+	// two messages written at once would interleave into garbage.
+	writeMu sync.Mutex
 
 	done      chan struct{}
 	closeOnce sync.Once
@@ -86,6 +90,9 @@ func (w *WebRTCPeer) Read() ([]byte, error) {
 }
 
 func (w *WebRTCPeer) Write(bytes []byte) error {
+	w.writeMu.Lock()
+	defer w.writeMu.Unlock()
+
 	for chunk := range w.assembler.ChunkMessage(bytes) {
 		for w.channel.BufferedAmount()+uint64(len(chunk)) > maxBufferedAmount {
 			select {
