@@ -93,7 +93,7 @@ func (w *WebRTCPeer) Write(bytes []byte) error {
 	w.writeMu.Lock()
 	defer w.writeMu.Unlock()
 
-	for chunk := range w.assembler.ChunkMessage(bytes) {
+	for chunk := range w.assembler.chunks(bytes) {
 		for w.channel.BufferedAmount()+uint64(len(chunk)) > maxBufferedAmount {
 			select {
 			case <-w.sendReady:

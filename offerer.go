@@ -110,7 +110,10 @@ func (o *Offerer) Offer(offerConfig *OfferConfig) (*Offer, error) {
 	case <-time.After(time.Until(end)):
 	}
 
+	// From here on candidates trickle: one gathered after this would
+	// otherwise be in neither the offer nor a trickle message.
 	candMu.Lock()
+	trickle = true
 	resultCandidates := initialCandidates
 	candMu.Unlock()
 
