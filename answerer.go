@@ -78,8 +78,11 @@ func (a *Answerer) Answer(answerConfig *AnswerConfig, offer Offer, trickleAfter 
 		return nil, err
 	}
 
-	done := make(chan struct{})
-	var trickle = false
+	done := make(chan struct{}, 1)
+	// candMu guards trickle and initialCandidates: pion gathers candidates on
+	// its own goroutine while Answer waits to return the first ones.
+	var candMu sync.Mutex
+	var trickle bool
 	var initialCandidates []webrtc.ICECandidateInit
 	connection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		if candidate == nil {
@@ -87,14 +90,8 @@ func (a *Answerer) Answer(answerConfig *AnswerConfig, offer Offer, trickleAfter 
 			return
 		}
 
-		if trickle || time.Now().After(end) {
-			a.Lock()
-			cb := a.onIceCandidate
-			a.Unlock()
-			if cb != nil {
-				go cb(candidate)
-			}
-		} else {
+		candMu.Lock()
+		if !trickle && !time.Now().After(end) {
 			initialCandidates = append(initialCandidates, candidate.ToJSON())
 			// host candidate gathering is done, any further candidates should
 			// be signaled with Trickle ICE.
@@ -105,6 +102,16 @@ func (a *Answerer) Answer(answerConfig *AnswerConfig, offer Offer, trickleAfter 
 				default:
 				}
 			}
+			candMu.Unlock()
+			return
+		}
+		candMu.Unlock()
+
+		a.Lock()
+		cb := a.onIceCandidate
+		a.Unlock()
+		if cb != nil {
+			go cb(candidate)
 		}
 	})
 
@@ -210,8 +217,15 @@ func (a *Answerer) Answer(answerConfig *AnswerConfig, offer Offer, trickleAfter 
 	case <-time.After(time.Until(end)):
 	}
 
+	// From here on candidates trickle: one gathered after this would
+	// otherwise be in neither the answer nor a trickle message.
+	candMu.Lock()
+	trickle = true
+	candidates := initialCandidates
+	candMu.Unlock()
+
 	return &Answer{
-		Candidates:  initialCandidates,
+		Candidates:  candidates,
 		Description: answer,
 	}, nil
 }

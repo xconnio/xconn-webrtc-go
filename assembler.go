@@ -2,6 +2,7 @@ package xconnwebrtc
 
 import (
 	"bytes"
+	"iter"
 	"sync"
 )
 
@@ -22,34 +23,40 @@ func NewWebRTCMessageAssembler(mtu int) *WebRTCMessageAssembler {
 }
 
 func (m *WebRTCMessageAssembler) ChunkMessage(message []byte) chan []byte {
-	m.Lock()
-	defer m.Unlock()
+	out := make(chan []byte, m.chunkCount(message))
+	for chunk := range m.chunks(message) {
+		out <- chunk
+	}
+	close(out)
+	return out
+}
 
+// chunkCount is how many chunks message is sent in. An empty message is still
+// one (empty, final) chunk, so the receiver gets it.
+func (m *WebRTCMessageAssembler) chunkCount(message []byte) int {
 	chunkSize := m.mtu - 1
-	totalChunks := (len(message) + chunkSize - 1) / chunkSize
+	return max(1, (len(message)+chunkSize-1)/chunkSize)
+}
 
-	chunks := make(chan []byte)
-
-	go func() {
-		for i := 0; i < totalChunks; i++ {
+// chunks yields message's chunks, as ChunkMessage describes, each made only
+// when it's asked for so a large message isn't copied whole at once.
+func (m *WebRTCMessageAssembler) chunks(message []byte) iter.Seq[[]byte] {
+	return func(yield func([]byte) bool) {
+		chunkSize := m.mtu - 1
+		total := m.chunkCount(message)
+		for i := range total {
 			start := i * chunkSize
-			end := start + chunkSize
-			if i == totalChunks-1 {
-				end = len(message)
-			}
-			chunk := message[start:end]
+			end := min(start+chunkSize, len(message))
 
-			var isFinal byte = 0
-			if i == totalChunks-1 {
+			var isFinal byte
+			if i == total-1 {
 				isFinal = 1
 			}
-
-			chunks <- append([]byte{isFinal}, chunk...)
+			if !yield(append([]byte{isFinal}, message[start:end]...)) {
+				return
+			}
 		}
-		close(chunks)
-	}()
-
-	return chunks
+	}
 }
 
 func (m *WebRTCMessageAssembler) Feed(data []byte) []byte {
